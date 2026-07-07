@@ -1,0 +1,13 @@
+[project]
+name = "ev-charge-planner"
+version = "0.1.0"
+description = "Smart EV-ladning ud fra elpriser (Strømligning) med Zaptec-styring — Home Assistant custom integration"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

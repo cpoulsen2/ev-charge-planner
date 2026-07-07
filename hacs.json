@@ -1,0 +1,5 @@
+{
+  "name": "EV Charge Planner",
+  "render_readme": true,
+  "homeassistant": "2024.1.0"
+}
