@@ -1,0 +1,84 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "EV Charge Planner",
+        "description": "Select your Zaptec entities and price sensor.",
+        "data": {
+          "price_sensor": "Price sensor (Strømligning)",
+          "charger_mode_sensor": "Charger mode sensor",
+          "charge_power_sensor": "Charge power sensor",
+          "session_energy_sensor": "Session energy sensor (kWh)",
+          "authorize_button": "Authorize button",
+          "resume_button": "Resume button",
+          "stop_button": "Stop button",
+          "notify_service": "Notify service (optional, e.g. notify.mobile_app_iphone_cp)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "EV Charge Planner",
+        "menu_options": {
+          "add_vehicle": "Add vehicle",
+          "remove_vehicle": "Remove vehicle",
+          "settings": "Settings"
+        }
+      },
+      "add_vehicle": {
+        "title": "Add vehicle",
+        "data": {
+          "name": "Name (e.g. ID.3, Model Y)",
+          "capacity_kwh": "Battery capacity (kWh)",
+          "soc_sensor": "SoC sensor (optional — read automatically if set)"
+        }
+      },
+      "remove_vehicle": {
+        "title": "Remove vehicle",
+        "data": { "name": "Vehicle" }
+      },
+      "settings": {
+        "title": "Settings",
+        "data": { "min_block_minutes": "Minimum block size (min)" }
+      }
+    },
+    "abort": {
+      "no_vehicles": "There are no vehicles to remove."
+    }
+  },
+  "entity": {
+    "select": {
+      "active_vehicle": { "name": "Active vehicle" },
+      "mode": { "name": "Charge mode" }
+    },
+    "number": {
+      "current_soc": { "name": "Battery %" },
+      "target_soc": { "name": "Charge to %" },
+      "guest_capacity": { "name": "Guest capacity" },
+      "charge_power": { "name": "Charge power" }
+    },
+    "datetime": {
+      "departure": { "name": "Departure time" }
+    },
+    "switch": {
+      "enabled": { "name": "Automation enabled" },
+      "observer_mode": { "name": "Observer mode" }
+    },
+    "button": {
+      "recalculate": { "name": "Recalculate plan" },
+      "force_charge": { "name": "Charge now" },
+      "stop_force": { "name": "Stop force charge" }
+    },
+    "sensor": {
+      "status": { "name": "Status" },
+      "live_soc": { "name": "Live battery %" },
+      "next_slot": { "name": "Next slot" },
+      "estimated_cost": { "name": "Estimated cost" }
+    },
+    "binary_sensor": {
+      "charging": { "name": "Charging" }
+    }
+  }
+}
