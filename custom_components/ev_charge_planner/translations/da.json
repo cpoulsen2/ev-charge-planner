@@ -1,0 +1,84 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "EV Charge Planner",
+        "description": "Vælg dine Zaptec-entities og pris-sensor.",
+        "data": {
+          "price_sensor": "Pris-sensor (Strømligning)",
+          "charger_mode_sensor": "Lader-mode sensor",
+          "charge_power_sensor": "Ladeeffekt-sensor",
+          "session_energy_sensor": "Session-energi sensor (kWh)",
+          "authorize_button": "Authorize-knap",
+          "resume_button": "Resume-knap",
+          "stop_button": "Stop-knap",
+          "notify_service": "Notify-service (valgfri, fx notify.mobile_app_iphone_cp)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "EV Charge Planner",
+        "menu_options": {
+          "add_vehicle": "Tilføj bil",
+          "remove_vehicle": "Fjern bil",
+          "settings": "Indstillinger"
+        }
+      },
+      "add_vehicle": {
+        "title": "Tilføj bil",
+        "data": {
+          "name": "Navn (fx ID.3, Model Y)",
+          "capacity_kwh": "Batterikapacitet (kWh)",
+          "soc_sensor": "SoC-sensor (valgfri — aflæses automatisk hvis sat)"
+        }
+      },
+      "remove_vehicle": {
+        "title": "Fjern bil",
+        "data": { "name": "Bil" }
+      },
+      "settings": {
+        "title": "Indstillinger",
+        "data": { "min_block_minutes": "Minimum blokstørrelse (min)" }
+      }
+    },
+    "abort": {
+      "no_vehicles": "Der er ingen biler at fjerne."
+    }
+  },
+  "entity": {
+    "select": {
+      "active_vehicle": { "name": "Aktiv bil" },
+      "mode": { "name": "Lademodus" }
+    },
+    "number": {
+      "current_soc": { "name": "Batteri %" },
+      "target_soc": { "name": "Lad til %" },
+      "guest_capacity": { "name": "Gæste-kapacitet" },
+      "charge_power": { "name": "Ladeeffekt" }
+    },
+    "datetime": {
+      "departure": { "name": "Afrejsetid" }
+    },
+    "switch": {
+      "enabled": { "name": "Automatik aktiv" },
+      "observer_mode": { "name": "Observatør-tilstand" }
+    },
+    "button": {
+      "recalculate": { "name": "Genberegn plan" },
+      "force_charge": { "name": "Lad straks" },
+      "stop_force": { "name": "Stop force-ladning" }
+    },
+    "sensor": {
+      "status": { "name": "Status" },
+      "live_soc": { "name": "Live batteri %" },
+      "next_slot": { "name": "Næste slot" },
+      "estimated_cost": { "name": "Estimeret pris" }
+    },
+    "binary_sensor": {
+      "charging": { "name": "Lader" }
+    }
+  }
+}
