@@ -39,6 +39,7 @@ CAR_SIDE_STOP_TICKS = 4  # antal minutter med 0 W efter ladning før "bilen stop
 
 # --- Config entry: data (fast opsætning) ---
 CONF_PRICE_SENSOR = "price_sensor"
+CONF_TOMORROW_SENSOR = "tomorrow_sensor"  # valgfri: sensor med morgendagens priser
 CONF_CHARGER_MODE_SENSOR = "charger_mode_sensor"
 CONF_CHARGE_POWER_SENSOR = "charge_power_sensor"
 CONF_SESSION_ENERGY_SENSOR = "session_energy_sensor"

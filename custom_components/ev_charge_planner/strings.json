@@ -6,6 +6,7 @@
         "description": "Select your Zaptec entities and price sensor.",
         "data": {
           "price_sensor": "Price sensor (Strømligning)",
+          "tomorrow_sensor": "Tomorrow price sensor (optional, auto-detected)",
           "charger_mode_sensor": "Charger mode sensor",
           "charge_power_sensor": "Charge power sensor",
           "session_energy_sensor": "Session energy sensor (kWh)",

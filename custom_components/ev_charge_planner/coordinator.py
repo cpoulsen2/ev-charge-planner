@@ -46,6 +46,7 @@ from .const import (
     CONF_RESUME_BUTTON,
     CONF_SESSION_ENERGY_SENSOR,
     CONF_STOP_BUTTON,
+    CONF_TOMORROW_SENSOR,
     CONF_VEHICLES,
     EVENT_ACTION,
     GUEST_VEHICLE,
@@ -159,6 +160,22 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
                 return v.soc_sensor
         return None
 
+    def _tomorrow_sensor_id(self) -> str | None:
+        """Sensor med morgendagens priser — eksplicit konfigureret eller auto-udledt.
+
+        Strømligning lægger morgendagens priser på en separat sensor
+        (fx sensor.stromligning_adjusted_price_vat →
+         binary_sensor.stromligning_adjusted_price_vat_tomorrow).
+        """
+        configured = self._cfg(CONF_TOMORROW_SENSOR)
+        if configured:
+            return configured
+        price = self._cfg(CONF_PRICE_SENSOR) or ""
+        if price.startswith("sensor."):
+            obj = price.split(".", 1)[1]
+            return f"binary_sensor.{obj}_tomorrow"
+        return None
+
     def _prices(self) -> tuple[list[dict], list[dict]]:
         st = self.hass.states.get(self._cfg(CONF_PRICE_SENSOR) or "")
         if not st:
@@ -166,6 +183,19 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         attrs = st.attributes
         raw_today = attrs.get("prices_today") or attrs.get("raw_today") or []
         raw_tomorrow = attrs.get("prices_tomorrow") or attrs.get("raw_tomorrow") or []
+
+        # Fald tilbage til den separate "tomorrow"-sensor hvis hovedsensoren ikke
+        # selv har morgendagens priser
+        if not raw_tomorrow:
+            tmr_id = self._tomorrow_sensor_id()
+            if tmr_id:
+                tmr = self.hass.states.get(tmr_id)
+                if tmr and tmr.state == "on":
+                    raw_tomorrow = (
+                        tmr.attributes.get("prices_tomorrow")
+                        or tmr.attributes.get("raw_tomorrow")
+                        or []
+                    )
         return list(raw_today), list(raw_tomorrow)
 
     # ---------- deadline / live SoC ----------

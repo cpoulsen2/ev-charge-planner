@@ -6,6 +6,7 @@
         "description": "Vælg dine Zaptec-entities og pris-sensor.",
         "data": {
           "price_sensor": "Pris-sensor (Strømligning)",
+          "tomorrow_sensor": "Morgendagens pris-sensor (valgfri, auto-detekteres)",
           "charger_mode_sensor": "Lader-mode sensor",
           "charge_power_sensor": "Ladeeffekt-sensor",
           "session_energy_sensor": "Session-energi sensor (kWh)",

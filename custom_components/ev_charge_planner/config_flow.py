@@ -24,11 +24,13 @@ from .const import (
     CONF_RESUME_BUTTON,
     CONF_SESSION_ENERGY_SENSOR,
     CONF_STOP_BUTTON,
+    CONF_TOMORROW_SENSOR,
     CONF_VEHICLES,
     DOMAIN,
 )
 
 _SENSOR = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
+_BINARY = selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor"))
 _BUTTON = selector.EntitySelector(selector.EntitySelectorConfig(domain="button"))
 _TEXT = selector.TextSelector()
 
@@ -37,6 +39,7 @@ def _data_schema() -> vol.Schema:
     return vol.Schema(
         {
             vol.Required(CONF_PRICE_SENSOR): _SENSOR,
+            vol.Optional(CONF_TOMORROW_SENSOR): _BINARY,
             vol.Required(CONF_CHARGER_MODE_SENSOR): _SENSOR,
             vol.Required(CONF_CHARGE_POWER_SENSOR): _SENSOR,
             vol.Required(CONF_SESSION_ENERGY_SENSOR): _SENSOR,
