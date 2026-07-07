@@ -2,10 +2,10 @@
   "domain": "ev_charge_planner",
   "name": "EV Charge Planner",
   "version": "0.1.0",
-  "documentation": "https://github.com/USERNAME/ev-charge-planner",
-  "issue_tracker": "https://github.com/USERNAME/ev-charge-planner/issues",
+  "documentation": "https://github.com/cpoulsen2/ev-charge-planner",
+  "issue_tracker": "https://github.com/cpoulsen2/ev-charge-planner/issues",
   "dependencies": [],
-  "codeowners": ["@USERNAME"],
+  "codeowners": ["@cpoulsen2"],
   "requirements": [],
   "iot_class": "local_polling",
   "config_flow": false

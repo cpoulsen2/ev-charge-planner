@@ -27,7 +27,7 @@ til en rigtig custom integration, så den kan installeres via HACS og fejlsøges
 ## Installation (via HACS) — når integrationen er færdig
 
 1. HACS → Integrations → tre-prikker → **Custom repositories**
-2. Tilføj `https://github.com/USERNAME/ev-charge-planner` som type **Integration**
+2. Tilføj `https://github.com/cpoulsen2/ev-charge-planner` som type **Integration**
 3. Installér **EV Charge Planner**, genstart Home Assistant
 4. Settings → Devices & Services → **Add Integration** → EV Charge Planner
 
