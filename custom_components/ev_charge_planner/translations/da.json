@@ -84,7 +84,8 @@
     "button": {
       "recalculate": { "name": "Genberegn plan" },
       "force_charge": { "name": "Lad straks" },
-      "stop_force": { "name": "Stop force-ladning" }
+      "stop_force": { "name": "Stop force-ladning" },
+      "stop_charging": { "name": "Stop ladning" }
     },
     "sensor": {
       "status": { "name": "Status" },

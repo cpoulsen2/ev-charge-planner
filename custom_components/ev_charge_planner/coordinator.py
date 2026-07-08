@@ -121,6 +121,20 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         await self.async_save()
         await self.async_refresh()
 
+    async def async_stop_charging(self) -> None:
+        """Stop/annullér ladning nu: tryk Zaptec-stop og slå automatik fra.
+
+        Automatikken slås fra så den ikke genstarter; brugeren aktiverer igen
+        for at følge planen. Respekterer observatør-tilstand (rører kun laderen
+        når observatør er slået fra)."""
+        rt = self.runtime
+        rt.force_charge = False
+        rt.enabled = False
+        if not rt.observer_mode:
+            await self._press(CONF_STOP_BUTTON)
+        await self.async_save()
+        await self.async_refresh()
+
     # ---------- aflæsning af eksterne sensorer ----------
 
     def _cfg(self, key: str) -> str | None:

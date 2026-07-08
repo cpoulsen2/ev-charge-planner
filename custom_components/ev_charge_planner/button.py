@@ -20,6 +20,7 @@ async def async_setup_entry(
         RecalculateButton(coordinator),
         ForceChargeButton(coordinator),
         StopForceButton(coordinator),
+        StopChargingButton(coordinator),
     ]
     for e in entities:
         e.entity_id = f"button.ev_charge_planner_{e._evcp_key}"
@@ -64,3 +65,16 @@ class StopForceButton(EvcpEntity, ButtonEntity):
     async def async_press(self) -> None:
         self.runtime.force_charge = False
         await self.coordinator.async_user_changed()
+
+
+class StopChargingButton(EvcpEntity, ButtonEntity):
+    """Stop/annullér ladning nu (og slå automatik fra)."""
+
+    _attr_translation_key = "stop_charging"
+    _attr_icon = "mdi:stop-circle-outline"
+
+    def __init__(self, coordinator: EvcpCoordinator) -> None:
+        super().__init__(coordinator, "stop_charging")
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_stop_charging()

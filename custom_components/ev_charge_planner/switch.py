@@ -42,8 +42,8 @@ class EnabledSwitch(EvcpEntity, SwitchEntity):
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        self.runtime.enabled = False
-        await self.coordinator.async_user_changed()
+        # Slå fra = stop en igangværende ladning (og forhindr genstart)
+        await self.coordinator.async_stop_charging()
         self.async_write_ha_state()
 
 

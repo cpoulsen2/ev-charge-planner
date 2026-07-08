@@ -84,7 +84,8 @@
     "button": {
       "recalculate": { "name": "Recalculate plan" },
       "force_charge": { "name": "Charge now" },
-      "stop_force": { "name": "Stop force charge" }
+      "stop_force": { "name": "Stop force charge" },
+      "stop_charging": { "name": "Stop charging" }
     },
     "sensor": {
       "status": { "name": "Status" },
