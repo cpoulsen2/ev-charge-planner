@@ -463,14 +463,19 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
                 live_soc=live_soc,
             )
 
-        # 8) Ingen plan?
-        if not plan or not plan.plan:
-            reason = "Ingen ladeplan (afventer priser/valg)"
-            if plan and plan.warning == planner.WARN_ALREADY_AT_TARGET:
-                reason = "Allerede ved mål"
-            elif plan and plan.warning == planner.WARN_NO_PRICES:
-                reason = "Ingen prisdata i tidsvinduet"
-            return dec(ACT_WAITING, reason, live_soc=live_soc)
+        # 8) Flyder der strøm, men skal vi IKKE lade (uden for slot, ingen force)? → stop
+        #    Køres FØR "ingen plan"/"afventer"-grenene, så en færdig eller tom plan
+        #    også stopper en igangværende ladning. Baseret på faktisk effekt, så det
+        #    også fanges hvis Zaptec skifter mode (fx connected_finished) mens der lades.
+        power_flowing = power > CHARGE_POWER_THRESHOLD_KW
+        if power_flowing and not should_be_charging:
+            self._do_stop(observer)
+            return dec(
+                ACT_PAUSE,
+                "Uden for slot — stopper ladning",
+                live_soc=live_soc,
+                actuated=not observer,
+            )
 
         # 9) I slot?
         if in_slot:
@@ -490,15 +495,14 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
                 live_soc=live_soc,
             )
 
-        # 10) Uden for slot
-        if really_charging:
-            self._do_stop(observer)
-            return dec(
-                ACT_PAUSE,
-                "Uden for slot — pauser ladning",
-                live_soc=live_soc,
-                actuated=not observer,
-            )
+        # 10) Ikke i slot og ingen strøm → afventer
+        if not plan or not plan.plan:
+            reason = "Ingen ladeplan (afventer priser/valg)"
+            if plan and plan.warning == planner.WARN_ALREADY_AT_TARGET:
+                reason = "Allerede ved mål"
+            elif plan and plan.warning == planner.WARN_NO_PRICES:
+                reason = "Ingen prisdata i tidsvinduet"
+            return dec(ACT_WAITING, reason, live_soc=live_soc)
 
         nxt = next((b for b in plan.plan if b.start_ms > now_ms), None)
         if nxt:
