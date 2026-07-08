@@ -23,10 +23,12 @@ from .const import (
     CONF_PRICE_SENSOR,
     CONF_RESUME_BUTTON,
     CONF_SESSION_ENERGY_SENSOR,
+    CONF_NOTIFY_TARGETS,
     CONF_STOP_BUTTON,
     CONF_TOMORROW_SENSOR,
     CONF_VEHICLES,
     DOMAIN,
+    NOTIFY_DEFAULTS,
 )
 
 _SENSOR = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
@@ -85,7 +87,42 @@ class EvcpOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init",
-            menu_options=["add_vehicle", "remove_vehicle", "settings"],
+            menu_options=["add_vehicle", "remove_vehicle", "notifications", "settings"],
+        )
+
+    async def async_step_notifications(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            changes = {CONF_NOTIFY_TARGETS: user_input.get(CONF_NOTIFY_TARGETS, [])}
+            for key in NOTIFY_DEFAULTS:
+                changes[key] = user_input.get(key, NOTIFY_DEFAULTS[key])
+            return self._save(changes)
+
+        services = self.hass.services.async_services().get("notify", {})
+        notify_options = sorted(f"notify.{name}" for name in services)
+        opts = self._entry.options
+
+        schema_dict: dict = {
+            vol.Optional(
+                CONF_NOTIFY_TARGETS,
+                default=opts.get(CONF_NOTIFY_TARGETS, []),
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=notify_options,
+                    multiple=True,
+                    custom_value=True,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            )
+        }
+        for key, default in NOTIFY_DEFAULTS.items():
+            schema_dict[
+                vol.Optional(key, default=opts.get(key, default))
+            ] = selector.BooleanSelector()
+
+        return self.async_show_form(
+            step_id="notifications", data_schema=vol.Schema(schema_dict)
         )
 
     async def async_step_add_vehicle(

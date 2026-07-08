@@ -25,7 +25,21 @@
         "menu_options": {
           "add_vehicle": "Tilføj bil",
           "remove_vehicle": "Fjern bil",
+          "notifications": "Notifikationer",
           "settings": "Indstillinger"
+        }
+      },
+      "notifications": {
+        "title": "Notifikationer",
+        "description": "Vælg modtagere og hvilke hændelser der skal sendes besked om.",
+        "data": {
+          "notify_targets": "Modtagere (notify-tjenester)",
+          "notify_charging_started": "Ladning startet",
+          "notify_target_reached": "Mål nået",
+          "notify_car_side_stop": "Bilen stoppede selv",
+          "notify_cable_connected": "Bil tilsluttet (vælg bil)",
+          "notify_new_plan": "Ny ladeplan",
+          "notify_not_enough_time": "Ikke nok tid"
         }
       },
       "add_vehicle": {

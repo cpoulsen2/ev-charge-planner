@@ -51,6 +51,17 @@ CONF_NOTIFY_SERVICE = "notify_service"
 # --- Config entry: options (kan ændres senere) ---
 CONF_VEHICLES = "vehicles"
 CONF_MIN_BLOCK_MINUTES = "min_block_minutes"
+CONF_NOTIFY_TARGETS = "notify_targets"  # liste af notify.*-tjenester
+
+# Notifikationstyper og deres standard (til/fra). Nøglerne gemmes i options.
+NOTIFY_DEFAULTS = {
+    "notify_charging_started": True,
+    "notify_target_reached": True,
+    "notify_car_side_stop": True,
+    "notify_cable_connected": False,
+    "notify_new_plan": False,
+    "notify_not_enough_time": True,
+}
 
 # --- Zaptec charger_mode værdier ---
 CM_DISCONNECTED = "disconnected"

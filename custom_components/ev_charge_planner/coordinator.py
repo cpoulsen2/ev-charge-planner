@@ -45,10 +45,12 @@ from .const import (
     CONF_PRICE_SENSOR,
     CONF_RESUME_BUTTON,
     CONF_SESSION_ENERGY_SENSOR,
+    CONF_NOTIFY_TARGETS,
     CONF_STOP_BUTTON,
     CONF_TOMORROW_SENSOR,
     CONF_VEHICLES,
     EVENT_ACTION,
+    NOTIFY_DEFAULTS,
     GUEST_VEHICLE,
     MODE_STANDARD,
     STANDARD_DEADLINE_HOUR,
@@ -280,6 +282,36 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             len(self.plan_result.plan),
             self.plan_result.warning,
         )
+        self._post_recalc_notifications()
+
+    def _post_recalc_notifications(self) -> None:
+        """Notifikationer der udløses af en ny plan (ikke-nok-tid / ny plan)."""
+        pr = self.plan_result
+        rt = self.runtime
+        if not pr:
+            return
+        # Ikke nok tid — notificér én gang indtil advarslen forsvinder igen
+        if pr.warning == planner.WARN_NOT_ENOUGH_TIME:
+            if not rt.not_enough_time_notified:
+                rt.not_enough_time_notified = True
+                self._notify(
+                    "⚠️ Ikke nok tid",
+                    f"Kan ikke nå {rt.target_soc:.0f}% inden deadline",
+                    "notify_not_enough_time",
+                )
+        else:
+            rt.not_enough_time_notified = False
+        # Ny plan — notificér når blokkene faktisk ændrer sig
+        sig = ";".join(f"{b.start_ms}-{b.end_ms}" for b in pr.plan)
+        if sig and sig != rt.last_plan_signature:
+            rt.last_plan_signature = sig
+            first = pr.plan[0]
+            start_local = dt_util.as_local(first.start_dt).strftime("%H:%M")
+            self._notify(
+                "📅 Ny ladeplan",
+                f"Start kl. {start_local} · ~{pr.estimated_cost:.0f} kr",
+                "notify_new_plan",
+            )
 
     # ---------- hoved-loop ----------
 
@@ -503,11 +535,11 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         rt.enabled = False
         if not rt.observer_mode:
             self.hass.async_create_task(self._press(CONF_STOP_BUTTON))
-            self._notify(
-                "🔋 Ladning færdig",
-                ("Bilen stoppede selv — " if car_side else "Klar — ")
-                + f"{target:.0f}%",
-            )
+        self._notify(
+            "🔋 Ladning færdig",
+            ("Bilen stoppede selv — " if car_side else "Klar — ") + f"{target:.0f}%",
+            "notify_car_side_stop" if car_side else "notify_target_reached",
+        )
         self.hass.async_create_task(self.async_save())
 
     # ---------- notifikation ----------
@@ -517,23 +549,40 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         power = self._charge_power()
         if power > CHARGE_POWER_THRESHOLD_KW and not rt.charge_start_notified:
             rt.charge_start_notified = True
-            if not rt.observer_mode:
-                self._notify(
-                    "⚡ Ladning startet",
-                    f"{rt.active_vehicle} lader nu — {self._live_soc():.0f}% ({power:.1f} kW)",
-                )
+            self._notify(
+                "⚡ Ladning startet",
+                f"{rt.active_vehicle} lader nu — {self._live_soc():.0f}% ({power:.1f} kW)",
+                "notify_charging_started",
+            )
             await self.async_save()
 
-    def _notify(self, title: str, message: str) -> None:
-        service = self._cfg(CONF_NOTIFY_SERVICE)
-        if not service or "." not in service:
+    def _notify_targets(self) -> list[str]:
+        targets = self.entry.options.get(CONF_NOTIFY_TARGETS)
+        if targets:
+            return list(targets)
+        # Bagudkompatibilitet: gammelt enkelt-felt fra opsætningen
+        single = self._cfg(CONF_NOTIFY_SERVICE)
+        return [single] if single else []
+
+    def _notify_enabled(self, ntype: str) -> bool:
+        return bool(self.entry.options.get(ntype, NOTIFY_DEFAULTS.get(ntype, False)))
+
+    def _notify(self, title: str, message: str, ntype: str) -> None:
+        """Send notifikation af en given type til alle valgte modtagere.
+
+        Uafhængig af observatør-tilstand — kun laderstyring gates af observatør.
+        """
+        if not self._notify_enabled(ntype):
             return
-        domain, name = service.split(".", 1)
-        self.hass.async_create_task(
-            self.hass.services.async_call(
-                domain, name, {"title": title, "message": message}, blocking=False
+        for service in self._notify_targets():
+            if "." not in service:
+                continue
+            domain, name = service.split(".", 1)
+            self.hass.async_create_task(
+                self.hass.services.async_call(
+                    domain, name, {"title": title, "message": message}, blocking=False
+                )
             )
-        )
 
     # ---------- mode-overgange (ny session / bilskift) ----------
 
@@ -553,8 +602,15 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             rt.charge_state = "idle"
             rt.zero_power_ticks = 0
             rt.charge_start_notified = False
+            rt.not_enough_time_notified = False
+            rt.last_plan_signature = ""
             rt.session_baseline_kwh = self._session_energy()
             rt.active_vehicle = CHOOSE_VEHICLE
             rt.enabled = False
             self.plan_result = None
+            self._notify(
+                "🔌 Bil tilsluttet",
+                "Vælg hvilken bil du vil lade",
+                "notify_cable_connected",
+            )
             await self.async_save()

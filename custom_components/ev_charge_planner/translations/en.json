@@ -25,7 +25,21 @@
         "menu_options": {
           "add_vehicle": "Add vehicle",
           "remove_vehicle": "Remove vehicle",
+          "notifications": "Notifications",
           "settings": "Settings"
+        }
+      },
+      "notifications": {
+        "title": "Notifications",
+        "description": "Choose recipients and which events to notify about.",
+        "data": {
+          "notify_targets": "Recipients (notify services)",
+          "notify_charging_started": "Charging started",
+          "notify_target_reached": "Target reached",
+          "notify_car_side_stop": "Car stopped itself",
+          "notify_cable_connected": "Cable connected (choose vehicle)",
+          "notify_new_plan": "New charge plan",
+          "notify_not_enough_time": "Not enough time"
         }
       },
       "add_vehicle": {
