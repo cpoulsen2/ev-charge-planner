@@ -91,6 +91,7 @@
       "status": { "name": "Status" },
       "live_soc": { "name": "Live battery %" },
       "next_slot": { "name": "Next slot" },
+      "current_slot_end": { "name": "Current slot ends" },
       "estimated_cost": { "name": "Estimated cost" }
     },
     "binary_sensor": {

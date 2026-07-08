@@ -246,6 +246,26 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             dep = dt_util.as_local(dep)
         return planner.to_ms(dep)
 
+    def next_slot_start(self) -> datetime | None:
+        """Starttidspunkt for næste kommende ladeblok (uanset om vi er i et slot nu)."""
+        pr = self.plan_result
+        if not pr or not pr.plan:
+            return None
+        now_ms = planner.to_ms(dt_util.utcnow())
+        nxt = next((b for b in pr.plan if b.start_ms > now_ms), None)
+        return nxt.start_dt if nxt else None
+
+    def current_slot_end(self) -> datetime | None:
+        """Sluttidspunkt for det slot vi er i lige nu (None hvis ikke i et slot)."""
+        pr = self.plan_result
+        if not pr or not pr.plan:
+            return None
+        now_ms = planner.to_ms(dt_util.utcnow())
+        cur = next(
+            (b for b in pr.plan if b.start_ms <= now_ms < b.end_ms), None
+        )
+        return cur.end_dt if cur else None
+
     def _live_soc(self) -> float:
         rt = self.runtime
         sensor = self._soc_sensor_for(rt.active_vehicle)

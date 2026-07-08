@@ -27,6 +27,7 @@ async def async_setup_entry(
         StatusSensor(coordinator),
         LiveSocSensor(coordinator),
         NextSlotSensor(coordinator),
+        CurrentSlotEndSensor(coordinator),
         EstimatedCostSensor(coordinator),
     ]
     for e in entities:
@@ -111,8 +112,22 @@ class NextSlotSensor(EvcpEntity, SensorEntity):
 
     @property
     def native_value(self) -> datetime | None:
-        d = self.coordinator.data
-        return d.next_slot if d else None
+        return self.coordinator.next_slot_start()
+
+
+class CurrentSlotEndSensor(EvcpEntity, SensorEntity):
+    """Hvornår det nuværende ladeslot slutter (tomt hvis vi ikke er i et slot)."""
+
+    _attr_translation_key = "current_slot_end"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:clock-end"
+
+    def __init__(self, coordinator: EvcpCoordinator) -> None:
+        super().__init__(coordinator, "current_slot_end")
+
+    @property
+    def native_value(self) -> datetime | None:
+        return self.coordinator.current_slot_end()
 
 
 class EstimatedCostSensor(EvcpEntity, SensorEntity):

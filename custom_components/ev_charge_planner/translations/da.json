@@ -91,6 +91,7 @@
       "status": { "name": "Status" },
       "live_soc": { "name": "Live batteri %" },
       "next_slot": { "name": "Næste slot" },
+      "current_slot_end": { "name": "Nuværende slot slutter" },
       "estimated_cost": { "name": "Estimeret pris" }
     },
     "binary_sensor": {
