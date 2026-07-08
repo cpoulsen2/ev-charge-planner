@@ -52,6 +52,7 @@ from .const import (
     EVENT_ACTION,
     NOTIFY_DEFAULTS,
     GUEST_VEHICLE,
+    MODE_DEPARTURE,
     MODE_STANDARD,
     STANDARD_DEADLINE_HOUR,
     UPDATE_INTERVAL,
@@ -405,6 +406,23 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         # 4) Plan + slot
         plan = self.plan_result
         now_ms = planner.to_ms(dt_util.utcnow())
+
+        # Afgang: afrejsetid passeret → session slut, sluk automatik (og stop ladning)
+        if rt.mode == MODE_DEPARTURE and not rt.force_charge:
+            dl = self._deadline_ms()
+            if dl is not None and now_ms >= dl:
+                if power > CHARGE_POWER_THRESHOLD_KW:
+                    self._do_stop(observer)
+                if rt.enabled:
+                    rt.enabled = False
+                    self.hass.async_create_task(self.async_save())
+                return dec(
+                    ACT_IDLE,
+                    "Afrejsetid passeret — automatik slået fra",
+                    live_soc=live_soc,
+                    actuated=not observer,
+                )
+
         in_slot = bool(
             plan
             and plan.plan
