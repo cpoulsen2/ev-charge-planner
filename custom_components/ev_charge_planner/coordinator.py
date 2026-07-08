@@ -317,8 +317,11 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         observer = rt.observer_mode
         power = self._charge_power()
         really_charging = mode == CM_CHARGING and power > CHARGE_POWER_THRESHOLD_KW
+        live_soc = 0.0  # opdateres når en bil er valgt
 
         def dec(action: str, reason: str, **kw) -> Decision:
+            # Medtag altid live_soc så SoC vises korrekt uanset gren (også når slået fra)
+            kw.setdefault("live_soc", live_soc)
             return Decision(
                 action=action,
                 reason=reason,
@@ -333,6 +336,10 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         if rt.active_vehicle == CHOOSE_VEHICLE:
             return dec(ACT_BLOCKED, "Vælg en bil i menuen")
 
+        # Beregn live-SoC nu hvor vi har en bil (bruges i alle grene nedenfor)
+        live_soc = self._live_soc()
+        target = rt.target_soc
+
         # 2) Master-kontakt?
         if not rt.enabled:
             return dec(ACT_IDLE, "Automatik slået fra (aktivér for at lade)")
@@ -340,9 +347,6 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         # 3) Frakoblet?
         if mode == CM_DISCONNECTED:
             return dec(ACT_IDLE, "Laderen er frakoblet")
-
-        live_soc = self._live_soc()
-        target = rt.target_soc
 
         # 4) Plan + slot
         plan = self.plan_result
