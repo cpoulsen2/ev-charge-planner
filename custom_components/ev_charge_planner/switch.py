@@ -19,12 +19,10 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: EvcpCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
-            EnabledSwitch(coordinator),
-            ObserverModeSwitch(coordinator),
-        ]
-    )
+    entities = [EnabledSwitch(coordinator), ObserverModeSwitch(coordinator)]
+    for e in entities:
+        e.entity_id = f"switch.ev_charge_planner_{e._evcp_key}"
+    async_add_entities(entities)
 
 
 class EnabledSwitch(EvcpEntity, SwitchEntity):

@@ -23,14 +23,15 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: EvcpCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
-            StatusSensor(coordinator),
-            LiveSocSensor(coordinator),
-            NextSlotSensor(coordinator),
-            EstimatedCostSensor(coordinator),
-        ]
-    )
+    entities = [
+        StatusSensor(coordinator),
+        LiveSocSensor(coordinator),
+        NextSlotSensor(coordinator),
+        EstimatedCostSensor(coordinator),
+    ]
+    for e in entities:
+        e.entity_id = f"sensor.ev_charge_planner_{e._evcp_key}"
+    async_add_entities(entities)
 
 
 class StatusSensor(EvcpEntity, SensorEntity):

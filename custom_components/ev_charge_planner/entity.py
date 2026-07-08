@@ -17,6 +17,7 @@ class EvcpEntity(CoordinatorEntity[EvcpCoordinator]):
     def __init__(self, coordinator: EvcpCoordinator, key: str) -> None:
         super().__init__(coordinator)
         self.runtime = coordinator.runtime
+        self._evcp_key = key
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{key}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.entry.entry_id)},

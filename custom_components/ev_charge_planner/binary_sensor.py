@@ -19,7 +19,9 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: EvcpCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([ChargingBinarySensor(coordinator)])
+    entity = ChargingBinarySensor(coordinator)
+    entity.entity_id = f"binary_sensor.ev_charge_planner_{entity._evcp_key}"
+    async_add_entities([entity])
 
 
 class ChargingBinarySensor(EvcpEntity, BinarySensorEntity):

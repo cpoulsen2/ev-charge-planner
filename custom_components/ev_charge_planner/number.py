@@ -17,14 +17,15 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: EvcpCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
-            CurrentSocNumber(coordinator),
-            TargetSocNumber(coordinator),
-            GuestCapacityNumber(coordinator),
-            ChargePowerNumber(coordinator),
-        ]
-    )
+    entities = [
+        CurrentSocNumber(coordinator),
+        TargetSocNumber(coordinator),
+        GuestCapacityNumber(coordinator),
+        ChargePowerNumber(coordinator),
+    ]
+    for e in entities:
+        e.entity_id = f"number.ev_charge_planner_{e._evcp_key}"
+    async_add_entities(entities)
 
 
 class _BaseNumber(EvcpEntity, NumberEntity):

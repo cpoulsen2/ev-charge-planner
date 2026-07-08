@@ -16,13 +16,14 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: EvcpCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
-            RecalculateButton(coordinator),
-            ForceChargeButton(coordinator),
-            StopForceButton(coordinator),
-        ]
-    )
+    entities = [
+        RecalculateButton(coordinator),
+        ForceChargeButton(coordinator),
+        StopForceButton(coordinator),
+    ]
+    for e in entities:
+        e.entity_id = f"button.ev_charge_planner_{e._evcp_key}"
+    async_add_entities(entities)
 
 
 class RecalculateButton(EvcpEntity, ButtonEntity):
