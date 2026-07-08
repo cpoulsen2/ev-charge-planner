@@ -110,10 +110,14 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         await self.store.save()
 
     async def async_user_changed(self) -> None:
-        """Kaldes af kontrol-entities når brugeren ændrer en værdi."""
+        """Kaldes af kontrol-entities når brugeren ændrer en værdi.
+
+        Bruger async_refresh() (øjeblikkelig) i stedet for async_request_refresh()
+        (debounced), så dashboardet opdaterer straks ved fx bilskift.
+        """
         self.recalculate()
         await self.async_save()
-        await self.async_request_refresh()
+        await self.async_refresh()
 
     # ---------- aflæsning af eksterne sensorer ----------
 
