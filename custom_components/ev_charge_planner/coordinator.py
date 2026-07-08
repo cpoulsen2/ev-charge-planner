@@ -106,6 +106,8 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         self._prev_charger_mode: str | None = None
         self._soc_cache_dirty = False
         self._last_soc_source = "manual"
+        self._authorize_sent = False  # autorisér kun én gang pr. requesting-episode
+        self._requesting_ticks = 0
 
     # ---------- persistens ----------
 
@@ -338,6 +340,17 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         await self._handle_mode_transition(self._prev_charger_mode, mode)
         self._prev_charger_mode = mode
 
+        # Autorisations-guard: nulstil når laderen ikke længere venter på autorisation.
+        # Sidder den fast i requesting, tillad ét genforsøg efter ~3 min.
+        if mode == CM_REQUESTING:
+            self._requesting_ticks += 1
+            if self._requesting_ticks >= 3:
+                self._authorize_sent = False
+                self._requesting_ticks = 0
+        else:
+            self._authorize_sent = False
+            self._requesting_ticks = 0
+
         decision = self._decide(mode)
 
         # Notifikation: ladning faktisk startet
@@ -539,11 +552,15 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         if observer:
             _LOGGER.info("[OBSERVER] Ville starte ladning (mode=%s)", mode)
             return
-        self.hass.async_create_task(self._start_charging(mode))
+        # Autorisér kun når laderen venter på det (connected_requesting) OG vi ikke
+        # allerede har autoriseret i denne episode — undgår gentagne authorize-tryk.
+        need_auth = mode == CM_REQUESTING and not self._authorize_sent
+        if need_auth:
+            self._authorize_sent = True
+        self.hass.async_create_task(self._start_charging(need_auth))
 
-    async def _start_charging(self, mode: str) -> None:
-        # Autorisér kun hvis laderen beder om det
-        if mode == CM_REQUESTING:
+    async def _start_charging(self, authorize: bool) -> None:
+        if authorize:
             await self._press(CONF_AUTHORIZE_BUTTON)
             await asyncio.sleep(5)
         await self._press(CONF_RESUME_BUTTON)
