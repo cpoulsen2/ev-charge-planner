@@ -72,6 +72,7 @@ class StatusSensor(EvcpEntity, SensorEntity):
             "charger_mode": d.charger_mode,
             "charge_power_kw": round(d.charge_power, 2),
             "live_soc": d.live_soc,
+            "soc_source": self.coordinator._last_soc_source,
             "target_soc": d.target_soc,
             "warning": d.warning,
             "next_slot": d.next_slot.isoformat() if d.next_slot else None,

@@ -101,6 +101,8 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         self.runtime: Runtime = store.runtime
         self.plan_result: planner.PlanResult | None = None
         self._prev_charger_mode: str | None = None
+        self._soc_cache_dirty = False
+        self._last_soc_source = "manual"
 
     # ---------- persistens ----------
 
@@ -219,14 +221,25 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
 
     def _live_soc(self) -> float:
         rt = self.runtime
-        # Hvis bilen har en SoC-sensor og den giver en gyldig værdi, brug den
         sensor = self._soc_sensor_for(rt.active_vehicle)
         if sensor:
             val = self._get_float(sensor)
             if val is not None:
+                # Gyldig aflæsning → brug og cache den
+                if rt.soc_cache.get(sensor) != val:
+                    rt.soc_cache[sensor] = val
+                    self._soc_cache_dirty = True
+                self._last_soc_source = f"sensor:{sensor}"
                 return round(val)
+            cached = rt.soc_cache.get(sensor)
+            if cached is not None:
+                # Bilen sover (sensor unavailable) → brug sidste kendte værdi
+                self._last_soc_source = f"sensor-cached:{sensor}"
+                return round(cached)
+            # Sensor sat men ingen værdi set endnu → manuel som nødløsning
         capacity = self._capacity_for(rt.active_vehicle)
         session = max(0.0, self._session_energy() - rt.session_baseline_kwh)
+        self._last_soc_source = "manual"
         return min(100, round(rt.current_soc + (session / capacity * 100)))
 
     # ---------- planberegning ----------
@@ -274,6 +287,11 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
 
         # Notifikation: ladning faktisk startet
         await self._maybe_notify_charge_start()
+
+        # Persistér SoC-cachen hvis der er set en ny gyldig aflæsning
+        if self._soc_cache_dirty:
+            self._soc_cache_dirty = False
+            await self.async_save()
 
         # Log altid beslutningen (fejlsøgning)
         self.hass.bus.async_fire(

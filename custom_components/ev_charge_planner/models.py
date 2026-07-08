@@ -66,6 +66,9 @@ class Runtime:
     zero_power_ticks: int = 0
     session_complete: bool = False
     charge_start_notified: bool = False
+    # Sidste gyldige SoC-aflæsning pr. sensor (bruges når bilen sover og
+    # sensoren bliver "unavailable" — sidste kendte værdi er stadig korrekt)
+    soc_cache: dict = field(default_factory=dict)
 
     @property
     def departure(self) -> datetime | None:
