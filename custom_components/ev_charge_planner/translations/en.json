@@ -79,7 +79,8 @@
       "estimated_cost": { "name": "Estimated cost" }
     },
     "binary_sensor": {
-      "charging": { "name": "Charging" }
+      "charging": { "name": "Charging" },
+      "manual_soc": { "name": "Manual SoC" }
     }
   }
 }

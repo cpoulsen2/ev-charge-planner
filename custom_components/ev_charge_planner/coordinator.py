@@ -162,6 +162,10 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
                 return v.soc_sensor
         return None
 
+    def active_vehicle_has_sensor(self) -> bool:
+        """True hvis den valgte bil har en SoC-sensor (så skyderen er unødvendig)."""
+        return bool(self._soc_sensor_for(self.runtime.active_vehicle))
+
     def _tomorrow_sensor_id(self) -> str | None:
         """Sensor med morgendagens priser — eksplicit konfigureret eller auto-udledt.
 

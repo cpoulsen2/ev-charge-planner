@@ -79,7 +79,8 @@
       "estimated_cost": { "name": "Estimeret pris" }
     },
     "binary_sensor": {
-      "charging": { "name": "Lader" }
+      "charging": { "name": "Lader" },
+      "manual_soc": { "name": "SoC sættes manuelt" }
     }
   }
 }
