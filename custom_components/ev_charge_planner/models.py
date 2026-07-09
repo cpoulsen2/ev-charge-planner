@@ -71,6 +71,10 @@ class Runtime:
     # Sidste gyldige SoC-aflæsning pr. sensor (bruges når bilen sover og
     # sensoren bliver "unavailable" — sidste kendte værdi er stadig korrekt)
     soc_cache: dict = field(default_factory=dict)
+    # Gemt plan + sidste charger-mode, så en HA-genstart midt i en ladning
+    # ikke mister ladeslots eller tror det er en ny session
+    plan_data: dict = field(default_factory=dict)
+    prev_charger_mode: str = ""
 
     @property
     def departure(self) -> datetime | None:

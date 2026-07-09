@@ -16,6 +16,8 @@ from custom_components.ev_charge_planner.planner import (
     WARN_NOT_ENOUGH_TIME,
     compute_plan,
     expand_mixed,
+    plan_result_from_dict,
+    plan_result_to_dict,
     to_ms,
 )
 
@@ -122,6 +124,20 @@ def test_contiguous_slots_merge_into_one_block():
     # Alle valgte slots i time 1-2 er sammenhængende → 1 blok
     assert len(res.plan) == 1
     assert res.plan[0].start_ms == to_ms(hours(1))
+
+
+def test_plan_result_serialization_roundtrip():
+    # En plan skal kunne serialiseres og genskabes 1:1 (persistens over genstart)
+    res = _plan()
+    data = plan_result_to_dict(res)
+    back = plan_result_from_dict(data)
+    assert back.warning == res.warning
+    assert len(back.plan) == len(res.plan)
+    for a, b in zip(res.plan, back.plan):
+        assert a.start_ms == b.start_ms
+        assert a.end_ms == b.end_ms
+        assert abs(a.avg_price - b.avg_price) < 1e-9
+        assert a.duration_min == b.duration_min
 
 
 def test_min_block_avoids_tiny_blocks():

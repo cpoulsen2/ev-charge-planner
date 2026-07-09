@@ -37,7 +37,11 @@ async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool
     await store.load()
 
     coordinator = EvcpCoordinator(hass, entry, store)
-    coordinator.recalculate()
+    # Gendan gemt plan (så en HA-genstart midt i en ladning ikke mister ladeslots);
+    # genberegn kun hvis der ingen gemt plan er
+    coordinator.restore_plan()
+    if coordinator.plan_result is None:
+        coordinator.recalculate()
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

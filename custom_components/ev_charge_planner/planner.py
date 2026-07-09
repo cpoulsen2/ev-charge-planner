@@ -11,7 +11,7 @@ så adfærden matcher den oprindelige kode 1:1.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
 SLOT_MS = 15 * 60 * 1000  # 900000 — én kvart-slot i millisekunder
@@ -301,3 +301,31 @@ def compute_plan(
     result.plan = plan
     result.estimated_cost = sum(b.cost for b in plan)
     return result
+
+
+def plan_result_to_dict(pr: PlanResult) -> dict:
+    """Serialisér en PlanResult (så planen kan gemmes og overleve genstart)."""
+    return {
+        "plan": [asdict(b) for b in pr.plan],
+        "warning": pr.warning,
+        "estimated_cost": pr.estimated_cost,
+        "energy_needed": pr.energy_needed,
+        "slots_needed": pr.slots_needed,
+        "deadline_ms": pr.deadline_ms,
+        "current_soc": pr.current_soc,
+        "target_pct": pr.target_pct,
+    }
+
+
+def plan_result_from_dict(data: dict) -> PlanResult:
+    """Genskab en PlanResult fra gemte data."""
+    return PlanResult(
+        plan=[PlanBlock(**b) for b in data.get("plan", [])],
+        warning=data.get("warning", WARN_NONE),
+        estimated_cost=data.get("estimated_cost", 0.0),
+        energy_needed=data.get("energy_needed", 0.0),
+        slots_needed=data.get("slots_needed", 0),
+        deadline_ms=data.get("deadline_ms", 0),
+        current_soc=data.get("current_soc", 0.0),
+        target_pct=data.get("target_pct", 0.0),
+    )

@@ -80,8 +80,10 @@ class Decision:
     timestamp: datetime = field(default_factory=dt_util.utcnow)
 
 
-# Tilstande hvor en tidligere session er "død" og en ny kan begynde
-_NEW_SESSION_FROM = {CM_DISCONNECTED, "unavailable", "unknown", None}
+# En ny session (fresh plug-in) tælles KUN fra en reel frakobling.
+# Transiente/opstarts-tilstande (unknown/unavailable/None) må IKKE nulstille en
+# igangværende session — ellers glemmer en HA-genstart bil/plan midt i en ladning.
+_NEW_SESSION_FROM = {CM_DISCONNECTED}
 
 
 class EvcpCoordinator(DataUpdateCoordinator[Decision]):
@@ -103,7 +105,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         self.store = store
         self.runtime: Runtime = store.runtime
         self.plan_result: planner.PlanResult | None = None
-        self._prev_charger_mode: str | None = None
+        self._prev_charger_mode: str | None = store.runtime.prev_charger_mode or None
         self._soc_cache_dirty = False
         self._last_soc_source = "manual"
         self._authorize_sent = False  # autorisér kun én gang pr. requesting-episode
@@ -291,19 +293,31 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
 
     # ---------- planberegning ----------
 
+    def _set_plan(self, pr: planner.PlanResult | None) -> None:
+        """Sæt planen og hold den persisterede kopi i sync."""
+        self.plan_result = pr
+        self.runtime.plan_data = planner.plan_result_to_dict(pr) if pr else {}
+
+    def restore_plan(self) -> None:
+        """Genskab planen fra gemte data (ved opstart)."""
+        data = self.runtime.plan_data
+        if data and data.get("plan"):
+            self.plan_result = planner.plan_result_from_dict(data)
+            _LOGGER.debug("Plan gendannet fra lager: %s blokke", len(self.plan_result.plan))
+
     def recalculate(self) -> None:
         """Genberegn ladeplanen ud fra nuværende kontroller og priser."""
         rt = self.runtime
         if rt.active_vehicle == CHOOSE_VEHICLE:
-            self.plan_result = None
+            self._set_plan(None)
             return
         deadline_ms = self._deadline_ms()
         if deadline_ms is None:
-            self.plan_result = None
+            self._set_plan(None)
             _LOGGER.debug("Ingen gyldig deadline — springer planberegning over")
             return
         raw_today, raw_tomorrow = self._prices()
-        self.plan_result = planner.compute_plan(
+        self._set_plan(planner.compute_plan(
             now_ms=planner.to_ms(dt_util.utcnow()),
             deadline_ms=deadline_ms,
             target_pct=rt.target_soc,
@@ -313,7 +327,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             raw_today=raw_today,
             raw_tomorrow=raw_tomorrow,
             min_block_mins=int(self.entry.options.get("min_block_minutes", 0)),
-        )
+        ))
         _LOGGER.debug(
             "Plan genberegnet: %s blokke, advarsel=%s",
             len(self.plan_result.plan),
@@ -358,7 +372,10 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
 
         # Håndtér mode-overgange (ny session / bilskift)
         await self._handle_mode_transition(self._prev_charger_mode, mode)
-        self._prev_charger_mode = mode
+        if mode != self._prev_charger_mode:
+            self._prev_charger_mode = mode
+            rt.prev_charger_mode = mode  # persistér så genstart kender sidste mode
+            await self.async_save()
 
         # Autorisations-guard: nulstil når laderen ikke længere venter på autorisation.
         # Sidder den fast i requesting, tillad ét genforsøg efter ~3 min.
@@ -680,7 +697,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             rt.session_baseline_kwh = self._session_energy()
             rt.active_vehicle = CHOOSE_VEHICLE
             rt.enabled = False
-            self.plan_result = None
+            self._set_plan(None)
             self._notify(
                 "🔌 Bil tilsluttet",
                 "Vælg hvilken bil du vil lade",
