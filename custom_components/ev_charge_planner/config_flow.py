@@ -135,6 +135,7 @@ class EvcpOptionsFlow(OptionsFlow):
                     "name": user_input["name"],
                     "capacity_kwh": float(user_input["capacity_kwh"]),
                     "soc_sensor": user_input.get("soc_sensor") or None,
+                    "soc_live": user_input.get("soc_live", True),
                 }
             )
             return self._save({CONF_VEHICLES: vehicles})
@@ -147,6 +148,7 @@ class EvcpOptionsFlow(OptionsFlow):
                     )
                 ),
                 vol.Optional("soc_sensor"): _SENSOR,
+                vol.Optional("soc_live", default=True): selector.BooleanSelector(),
             }
         )
         return self.async_show_form(step_id="add_vehicle", data_schema=schema)

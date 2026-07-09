@@ -28,6 +28,9 @@ class Vehicle:
     name: str
     capacity_kwh: float
     soc_sensor: str | None = None  # valgfri: aflæs SoC automatisk hvis sat
+    # True: sensoren opdaterer under ladning (fx Tesla) → brug direkte.
+    # False: sensoren opdaterer kun ved kørsel (fx VW) → brug som anker + beregn.
+    soc_live: bool = True
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -38,6 +41,7 @@ class Vehicle:
             name=data["name"],
             capacity_kwh=float(data["capacity_kwh"]),
             soc_sensor=data.get("soc_sensor") or None,
+            soc_live=data.get("soc_live", True),
         )
 
 

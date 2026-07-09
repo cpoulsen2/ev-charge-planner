@@ -1,7 +1,7 @@
 {
   "domain": "ev_charge_planner",
   "name": "EV Charge Planner",
-  "version": "0.3.7",
+  "version": "0.4.0",
   "documentation": "https://github.com/cpoulsen2/ev-charge-planner",
   "issue_tracker": "https://github.com/cpoulsen2/ev-charge-planner/issues",
   "dependencies": [],

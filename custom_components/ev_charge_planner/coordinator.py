@@ -191,6 +191,22 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         """True hvis den valgte bil har en SoC-sensor (så skyderen er unødvendig)."""
         return bool(self._soc_sensor_for(self.runtime.active_vehicle))
 
+    def _soc_live_for(self, name: str) -> bool:
+        """Opdaterer bilens SoC-sensor under ladning? (False = anker + beregning)."""
+        for v in self._vehicles():
+            if v.name == name:
+                return v.soc_live
+        return True
+
+    def active_vehicle_uses_anchor(self) -> bool:
+        """True hvis bilen har en sensor der IKKE opdaterer under ladning (VW-hybrid).
+
+        Så bruges sensoren som anker + tilført energi, og batteri-skyderen kan
+        vises som valgfri overstyring.
+        """
+        v = self.runtime.active_vehicle
+        return bool(self._soc_sensor_for(v)) and not self._soc_live_for(v)
+
     def _tomorrow_sensor_id(self) -> str | None:
         """Sensor med morgendagens priser — eksplicit konfigureret eller auto-udledt.
 
@@ -273,19 +289,32 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         sensor = self._soc_sensor_for(rt.active_vehicle)
         if sensor:
             val = self._get_float(sensor)
-            if val is not None:
-                # Gyldig aflæsning → brug og cache den
-                if rt.soc_cache.get(sensor) != val:
+            if self._soc_live_for(rt.active_vehicle):
+                # Live-sensor (Tesla): brug direkte, med cache-fallback ved dvale
+                if val is not None:
+                    if rt.soc_cache.get(sensor) != val:
+                        rt.soc_cache[sensor] = val
+                        self._soc_cache_dirty = True
+                    self._last_soc_source = f"sensor:{sensor}"
+                    return round(val)
+                cached = rt.soc_cache.get(sensor)
+                if cached is not None:
+                    self._last_soc_source = f"sensor-cached:{sensor}"
+                    return round(cached)
+                # ingen aflæsning endnu → fald til manuel nedenfor
+            else:
+                # Hybrid (VW): sensoren opdaterer kun ved kørsel. Gen-ankér når den
+                # giver en ny (frisk) værdi; ellers anker + tilført energi.
+                if val is not None and rt.soc_cache.get(sensor) != val:
                     rt.soc_cache[sensor] = val
                     self._soc_cache_dirty = True
-                self._last_soc_source = f"sensor:{sensor}"
-                return round(val)
-            cached = rt.soc_cache.get(sensor)
-            if cached is not None:
-                # Bilen sover (sensor unavailable) → brug sidste kendte værdi
-                self._last_soc_source = f"sensor-cached:{sensor}"
-                return round(cached)
-            # Sensor sat men ingen værdi set endnu → manuel som nødløsning
+                    rt.current_soc = val  # nyt anker
+                    rt.session_baseline_kwh = self._session_energy()
+                capacity = self._capacity_for(rt.active_vehicle)
+                session = max(0.0, self._session_energy() - rt.session_baseline_kwh)
+                self._last_soc_source = f"sensor-anchor:{sensor}"
+                return min(100, round(rt.current_soc + (session / capacity * 100)))
+        # Manuel (ingen sensor) — eller live-sensor uden aflæsning endnu
         capacity = self._capacity_for(rt.active_vehicle)
         session = max(0.0, self._session_energy() - rt.session_baseline_kwh)
         self._last_soc_source = "manual"

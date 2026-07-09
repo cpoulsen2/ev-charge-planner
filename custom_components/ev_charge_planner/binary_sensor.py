@@ -23,6 +23,7 @@ async def async_setup_entry(
     entities = [
         ChargingBinarySensor(coordinator),
         ManualSocBinarySensor(coordinator),
+        SocOverrideBinarySensor(coordinator),
     ]
     for e in entities:
         e.entity_id = f"binary_sensor.ev_charge_planner_{e._evcp_key}"
@@ -57,3 +58,17 @@ class ManualSocBinarySensor(EvcpEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool:
         return not self.coordinator.active_vehicle_has_sensor()
+
+
+class SocOverrideBinarySensor(EvcpEntity, BinarySensorEntity):
+    """ON når bilen bruger sensor-anker (VW-hybrid) → vis valgfri overstyrings-skyder."""
+
+    _attr_translation_key = "soc_override"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: EvcpCoordinator) -> None:
+        super().__init__(coordinator, "soc_override")
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.active_vehicle_uses_anchor()

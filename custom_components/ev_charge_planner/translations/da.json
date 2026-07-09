@@ -47,7 +47,8 @@
         "data": {
           "name": "Navn (fx ID.3, Model Y)",
           "capacity_kwh": "Batterikapacitet (kWh)",
-          "soc_sensor": "SoC-sensor (valgfri — aflæses automatisk hvis sat)"
+          "soc_sensor": "SoC-sensor (valgfri — aflæses automatisk hvis sat)",
+          "soc_live": "SoC-sensoren opdaterer under ladning (fra for VW — anker + beregn)"
         }
       },
       "remove_vehicle": {
@@ -96,7 +97,8 @@
     },
     "binary_sensor": {
       "charging": { "name": "Lader" },
-      "manual_soc": { "name": "SoC sættes manuelt" }
+      "manual_soc": { "name": "SoC sættes manuelt" },
+      "soc_override": { "name": "SoC-overstyring mulig" }
     }
   }
 }
