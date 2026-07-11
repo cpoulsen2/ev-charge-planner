@@ -50,7 +50,10 @@ class ActiveVehicleSelect(EvcpEntity, SelectEntity):
         return self.runtime.active_vehicle
 
     async def async_select_option(self, option: str) -> None:
-        self.runtime.active_vehicle = option
+        if option != self.runtime.active_vehicle:
+            self.runtime.active_vehicle = option
+            # Nulstil session-anker så den nye bil starter rent (ingen arvet energi)
+            self.coordinator.on_vehicle_changed()
         await self.coordinator.async_user_changed()
         self.async_write_ha_state()
 

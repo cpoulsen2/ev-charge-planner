@@ -216,6 +216,14 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             or self._session_energy() > self.runtime.session_baseline_kwh + 0.01
         )
 
+    def on_vehicle_changed(self) -> None:
+        """Nulstil session-anker når brugeren skifter bil, så den nye bil starter
+        rent: ingen arvet tilført energi (korrekt live-SoC) og ingen falsk 'mål nået'."""
+        rt = self.runtime
+        rt.session_baseline_kwh = self._session_energy()
+        rt.charge_state = "idle"
+        rt.zero_power_ticks = 0
+
     def _tomorrow_sensor_id(self) -> str | None:
         """Sensor med morgendagens priser — eksplicit konfigureret eller auto-udledt.
 
