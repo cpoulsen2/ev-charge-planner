@@ -110,6 +110,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         self._last_soc_source = "manual"
         self._authorize_sent = False  # autorisér kun én gang pr. requesting-episode
         self._requesting_ticks = 0
+        self._start_commanded_at: datetime | None = None
 
     # ---------- persistens ----------
 
@@ -206,6 +207,14 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         """
         v = self.runtime.active_vehicle
         return bool(self._soc_sensor_for(v)) and not self._soc_live_for(v)
+
+    def _has_charged_this_session(self) -> bool:
+        """Har vi faktisk ladet i denne session? Bruges så 'mål nået' ikke
+        fejludløses blot fordi man vælger en bil der allerede er fuld."""
+        return (
+            self.runtime.charge_state == "charging"
+            or self._session_energy() > self.runtime.session_baseline_kwh + 0.01
+        )
 
     def _tomorrow_sensor_id(self) -> str | None:
         """Sensor med morgendagens priser — eksplicit konfigureret eller auto-udledt.
@@ -534,14 +543,21 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
                 actuated=not observer,
             )
 
-        # 6) Mål nået?
+        # 6) Mål nået? KUN hvis vi faktisk har ladet i denne session — ellers har
+        #    brugeren bare valgt en bil der allerede er ved/over målet (rør ikke laderen).
         if live_soc >= target:
-            self._on_target_reached(target, car_side=False)
+            if self._has_charged_this_session():
+                self._on_target_reached(target, car_side=False)
+                return dec(
+                    ACT_TARGET_REACHED,
+                    f"Mål nået ({live_soc:.0f}% ≥ {target:.0f}%)",
+                    live_soc=live_soc,
+                    actuated=not observer,
+                )
             return dec(
-                ACT_TARGET_REACHED,
-                f"Mål nået ({live_soc:.0f}% ≥ {target:.0f}%)",
+                ACT_WAITING,
+                f"Allerede ved mål ({live_soc:.0f}%)",
                 live_soc=live_soc,
-                actuated=not observer,
             )
 
         # 7) Force charge
@@ -618,6 +634,9 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         if observer:
             _LOGGER.info("[OBSERVER] Ville starte ladning (mode=%s)", mode)
             return
+        # Husk hvornår vi selv kommanderede en start, så laderens efterfølgende
+        # finished→requesting ikke fejltolkes som et bilskifte (Fejl 2).
+        self._start_commanded_at = dt_util.utcnow()
         # Autorisér kun når laderen venter på det (connected_requesting) OG vi ikke
         # allerede har autoriseret i denne episode — undgår gentagne authorize-tryk.
         need_auth = mode == CM_REQUESTING and not self._authorize_sent
@@ -649,7 +668,9 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         rt = self.runtime
         rt.session_complete = True
         rt.force_charge = False
-        rt.current_soc = target
+        # Sensoren er sandheden når den findes — brænd kun målet ind for manuelle biler
+        if not self.active_vehicle_has_sensor():
+            rt.current_soc = target
         rt.session_baseline_kwh = self._session_energy()
         rt.enabled = False
         if not rt.observer_mode:
@@ -714,6 +735,13 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             CM_CHARGING,
         )
         is_car_swap = prev == CM_FINISHED and now == CM_REQUESTING
+        # Undertryk hvis vi selv lige har kommanderet en start: laderen vågner så i
+        # requesting af sig selv. Et ægte bilskifte kræver at nogen rører kablet.
+        if is_car_swap and self._start_commanded_at is not None:
+            since = (dt_util.utcnow() - self._start_commanded_at).total_seconds()
+            if since < 300:
+                _LOGGER.debug("Ignorerer finished→requesting: egen start for %ss siden", int(since))
+                is_car_swap = False
         if is_fresh_plugin or is_car_swap:
             _LOGGER.info("Ny session (%s → %s) — nulstiller", prev, now)
             rt.session_complete = False
