@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
-from homeassistant.util import dt as dt_util
 
 from .const import (
     CHOOSE_VEHICLE,
@@ -59,7 +57,7 @@ class Runtime:
     target_soc: float = DEFAULT_TARGET_SOC
     guest_capacity: float = DEFAULT_GUEST_CAPACITY_KWH
     charge_power: float = DEFAULT_POWER_KW
-    departure_iso: str | None = None  # afrejsetid (Afgang-mode), ISO-streng
+    departure_time: str = "07:00:00"  # afrejse-KLOKKESLÆT (Afgang) — næste forekomst
     enabled: bool = False  # master-kontakt (svarer til charger_switch)
     observer_mode: bool = True  # True = beregn+log men rør IKKE laderen
     force_charge: bool = False  # "lad straks" — ignorér plan
@@ -79,19 +77,6 @@ class Runtime:
     # ikke mister ladeslots eller tror det er en ny session
     plan_data: dict = field(default_factory=dict)
     prev_charger_mode: str = ""
-
-    @property
-    def departure(self) -> datetime | None:
-        if not self.departure_iso:
-            return None
-        try:
-            return dt_util.parse_datetime(self.departure_iso)
-        except (ValueError, TypeError):
-            return None
-
-    @departure.setter
-    def departure(self, value: datetime | None) -> None:
-        self.departure_iso = value.isoformat() if value else None
 
     def to_dict(self) -> dict:
         return asdict(self)

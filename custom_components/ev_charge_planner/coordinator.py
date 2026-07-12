@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -266,20 +266,20 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
 
     def _deadline_ms(self) -> int | None:
         rt = self.runtime
+        now = dt_util.now()  # lokal, aware
         if rt.mode == MODE_STANDARD:
-            now = dt_util.now()  # lokal, aware
-            deadline = now.replace(
-                hour=STANDARD_DEADLINE_HOUR, minute=0, second=0, microsecond=0
-            )
-            if deadline <= now:
-                deadline = deadline + timedelta(days=1)
-            return planner.to_ms(deadline)
-        dep = rt.departure
-        if dep is None:
-            return None
-        if dep.tzinfo is None:
-            dep = dt_util.as_local(dep)
-        return planner.to_ms(dep)
+            hour, minute = STANDARD_DEADLINE_HOUR, 0
+        else:
+            # Afgang: næste forekomst af afrejse-klokkeslættet (aldrig i fortiden)
+            try:
+                t = time.fromisoformat(rt.departure_time)
+            except (ValueError, TypeError):
+                t = time(7, 0)
+            hour, minute = t.hour, t.minute
+        deadline = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if deadline <= now:
+            deadline = deadline + timedelta(days=1)
+        return planner.to_ms(deadline)
 
     def next_slot_start(self) -> datetime | None:
         """Starttidspunkt for næste kommende ladeblok (uanset om vi er i et slot nu)."""

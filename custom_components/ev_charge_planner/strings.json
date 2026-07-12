@@ -75,7 +75,7 @@
       "guest_capacity": { "name": "Guest capacity" },
       "charge_power": { "name": "Charge power" }
     },
-    "datetime": {
+    "time": {
       "departure": { "name": "Departure time" }
     },
     "switch": {
