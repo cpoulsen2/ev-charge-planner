@@ -1,13 +1,13 @@
 {
   "domain": "ev_charge_planner",
   "name": "EV Charge Planner",
-  "version": "0.4.4",
-  "documentation": "https://github.com/cpoulsen2/ev-charge-planner",
-  "issue_tracker": "https://github.com/cpoulsen2/ev-charge-planner/issues",
-  "dependencies": [],
   "codeowners": ["@cpoulsen2"],
-  "requirements": [],
-  "iot_class": "local_polling",
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/cpoulsen2/ev-charge-planner",
   "integration_type": "hub",
-  "config_flow": true
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/cpoulsen2/ev-charge-planner/issues",
+  "requirements": [],
+  "version": "0.4.5"
 }
