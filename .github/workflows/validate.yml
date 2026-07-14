@@ -6,19 +6,12 @@ on:
   schedule:
     - cron: "0 3 * * 1"
 
+# Bemærk: HACS' egen "store"-validering (hacs/action) er fjernet med vilje.
+# Den er kun relevant for optagelse i den OFFICIELLE HACS-butik (kræver bl.a.
+# publicerede GitHub Releases + brand-assets i home-assistant/brands). For en
+# personlig custom-repo installeres integrationen fint uden den. Hassfest her
+# er Home Assistants egen manifest/kode-validering og er den relevante gate.
 jobs:
-  hacs:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - name: HACS validation
-        uses: hacs/action@main
-        with:
-          category: integration
-          # brands/topics kræves kun for optagelse i HACS' officielle store,
-          # ikke for en personlig custom-repo. Spring dem over i CI.
-          ignore: brands topics
-
   hassfest:
     runs-on: ubuntu-latest
     steps:
