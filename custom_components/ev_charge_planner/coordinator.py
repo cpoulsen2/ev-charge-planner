@@ -674,6 +674,8 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
 
     def _on_target_reached(self, target: float, car_side: bool) -> None:
         rt = self.runtime
+        # Faktisk SoC nu — beregnes FØR vi nulstiller anker/baseline nedenfor
+        actual = self._live_soc()
         rt.session_complete = True
         rt.force_charge = False
         # Sensoren er sandheden når den findes — brænd kun målet ind for manuelle biler
@@ -685,7 +687,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             self.hass.async_create_task(self._press(CONF_STOP_BUTTON))
         self._notify(
             "🔋 Ladning færdig",
-            ("Bilen stoppede selv — " if car_side else "Klar — ") + f"{target:.0f}%",
+            ("Bilen stoppede selv — " if car_side else "Klar — ") + f"{actual:.0f}%",
             "notify_car_side_stop" if car_side else "notify_target_reached",
         )
         self.hass.async_create_task(self.async_save())
