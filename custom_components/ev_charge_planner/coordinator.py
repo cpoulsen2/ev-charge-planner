@@ -690,6 +690,10 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             ("Bilen stoppede selv — " if car_side else "Klar — ") + f"{actual:.0f}%",
             "notify_car_side_stop" if car_side else "notify_target_reached",
         )
+        # Fravælg bilen så dashboardet viser overblikket (begge biler) igen.
+        # Ny ladning kræver at man vælger en bil på ny.
+        rt.active_vehicle = CHOOSE_VEHICLE
+        self._set_plan(None)
         self.hass.async_create_task(self.async_save())
 
     # ---------- notifikation ----------
