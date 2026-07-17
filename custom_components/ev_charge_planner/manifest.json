@@ -9,5 +9,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/cpoulsen2/ev-charge-planner/issues",
   "requirements": [],
-  "version": "0.4.6"
+  "version": "0.5.0"
 }

@@ -9,7 +9,7 @@ DOMAIN = "ev_charge_planner"
 PLATFORMS = [
     "select",
     "number",
-    "time",
+    "datetime",
     "switch",
     "button",
     "sensor",

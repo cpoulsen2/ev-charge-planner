@@ -75,7 +75,7 @@
       "guest_capacity": { "name": "Gæste-kapacitet" },
       "charge_power": { "name": "Ladeeffekt" }
     },
-    "time": {
+    "datetime": {
       "departure": { "name": "Afrejsetid" }
     },
     "switch": {

@@ -57,7 +57,7 @@ class Runtime:
     target_soc: float = DEFAULT_TARGET_SOC
     guest_capacity: float = DEFAULT_GUEST_CAPACITY_KWH
     charge_power: float = DEFAULT_POWER_KW
-    departure_time: str = "07:00:00"  # afrejse-KLOKKESLÆT (Afgang) — næste forekomst
+    departure_iso: str = ""  # afrejse dato+tid (Afgang) — auto-holdes i fremtiden
     enabled: bool = False  # master-kontakt (svarer til charger_switch)
     observer_mode: bool = True  # True = beregn+log men rør IKKE laderen
     force_charge: bool = False  # "lad straks" — ignorér plan

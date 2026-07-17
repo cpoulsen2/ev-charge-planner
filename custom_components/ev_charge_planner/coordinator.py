@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -264,22 +264,40 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
 
     # ---------- deadline / live SoC ----------
 
+    def maintain_departure(self) -> bool:
+        """Hold afrejse-datoen i fremtiden. Er den tom eller passeret, sættes den
+        til NÆSTE kl. 07:00 (dvs. i morgen tidlig når man sætter den om aftenen).
+        Returnerer True hvis værdien blev ændret."""
+        now = dt_util.now()  # lokal, aware
+        dep = dt_util.parse_datetime(self.runtime.departure_iso) if self.runtime.departure_iso else None
+        if dep is not None and dep.tzinfo is None:
+            dep = dt_util.as_local(dep)
+        if dep is None or dep <= now:
+            nxt = now.replace(hour=7, minute=0, second=0, microsecond=0)
+            if nxt <= now:
+                nxt = nxt + timedelta(days=1)
+            self.runtime.departure_iso = nxt.isoformat()
+            return True
+        return False
+
     def _deadline_ms(self) -> int | None:
         rt = self.runtime
         now = dt_util.now()  # lokal, aware
         if rt.mode == MODE_STANDARD:
-            hour, minute = STANDARD_DEADLINE_HOUR, 0
-        else:
-            # Afgang: næste forekomst af afrejse-klokkeslættet (aldrig i fortiden)
-            try:
-                t = time.fromisoformat(rt.departure_time)
-            except (ValueError, TypeError):
-                t = time(7, 0)
-            hour, minute = t.hour, t.minute
-        deadline = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if deadline <= now:
-            deadline = deadline + timedelta(days=1)
-        return planner.to_ms(deadline)
+            deadline = now.replace(
+                hour=STANDARD_DEADLINE_HOUR, minute=0, second=0, microsecond=0
+            )
+            if deadline <= now:
+                deadline = deadline + timedelta(days=1)
+            return planner.to_ms(deadline)
+        # Afgang: brug den (auto-vedligeholdte) afrejse-dato+tid
+        self.maintain_departure()
+        dep = dt_util.parse_datetime(rt.departure_iso) if rt.departure_iso else None
+        if dep is None:
+            return None
+        if dep.tzinfo is None:
+            dep = dt_util.as_local(dep)
+        return planner.to_ms(dep)
 
     def next_slot_start(self) -> datetime | None:
         """Starttidspunkt for næste kommende ladeblok (uanset om vi er i et slot nu)."""
@@ -415,6 +433,10 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
     async def _async_update_data(self) -> Decision:
         rt = self.runtime
         mode = self._charger_mode()
+
+        # Hold afrejse-datoen i fremtiden (auto til næste kl. 07:00)
+        if self.maintain_departure():
+            await self.async_save()
 
         # Håndtér mode-overgange (ny session / bilskift)
         await self._handle_mode_transition(self._prev_charger_mode, mode)
