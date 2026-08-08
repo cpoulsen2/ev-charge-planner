@@ -308,6 +308,18 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         nxt = next((b for b in pr.plan if b.start_ms > now_ms), None)
         return nxt.start_dt if nxt else None
 
+    def charge_time_minutes(self) -> int | None:
+        """Hvor lang tid (min) bilen skal lade for at nå målet ved nuværende effekt."""
+        rt = self.runtime
+        if rt.active_vehicle == CHOOSE_VEHICLE:
+            return None
+        capacity = self._capacity_for(rt.active_vehicle)
+        power = rt.charge_power or 11
+        energy_needed = capacity * max(0.0, rt.target_soc - self._live_soc()) / 100
+        if energy_needed <= 0 or power <= 0:
+            return 0
+        return round(energy_needed / power * 60)
+
     def current_slot_end(self) -> datetime | None:
         """Sluttidspunkt for det slot vi er i lige nu (None hvis ikke i et slot)."""
         pr = self.plan_result

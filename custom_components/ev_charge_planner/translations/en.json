@@ -93,6 +93,7 @@
       "live_soc": { "name": "Live battery %" },
       "next_slot": { "name": "Next slot" },
       "current_slot_end": { "name": "Current slot ends" },
+      "charge_time": { "name": "Charge time to target" },
       "estimated_cost": { "name": "Estimated cost" }
     },
     "binary_sensor": {

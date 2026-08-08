@@ -10,7 +10,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE
+from homeassistant.const import PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -28,6 +28,7 @@ async def async_setup_entry(
         LiveSocSensor(coordinator),
         NextSlotSensor(coordinator),
         CurrentSlotEndSensor(coordinator),
+        ChargeTimeSensor(coordinator),
         EstimatedCostSensor(coordinator),
     ]
     for e in entities:
@@ -129,6 +130,22 @@ class CurrentSlotEndSensor(EvcpEntity, SensorEntity):
     @property
     def native_value(self) -> datetime | None:
         return self.coordinator.current_slot_end()
+
+
+class ChargeTimeSensor(EvcpEntity, SensorEntity):
+    """Tid der skal lades for at nå målet ved nuværende effekt (minutter)."""
+
+    _attr_translation_key = "charge_time"
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_icon = "mdi:timer-sand"
+
+    def __init__(self, coordinator: EvcpCoordinator) -> None:
+        super().__init__(coordinator, "charge_time")
+
+    @property
+    def native_value(self) -> int | None:
+        return self.coordinator.charge_time_minutes()
 
 
 class EstimatedCostSensor(EvcpEntity, SensorEntity):

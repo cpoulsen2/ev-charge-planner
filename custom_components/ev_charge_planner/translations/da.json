@@ -93,6 +93,7 @@
       "live_soc": { "name": "Live batteri %" },
       "next_slot": { "name": "Næste slot" },
       "current_slot_end": { "name": "Nuværende slot slutter" },
+      "charge_time": { "name": "Ladetid til mål" },
       "estimated_cost": { "name": "Estimeret pris" }
     },
     "binary_sensor": {
