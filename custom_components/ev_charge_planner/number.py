@@ -90,6 +90,12 @@ class GuestCapacityNumber(_BaseNumber):
         super().__init__(coordinator, "guest_capacity")
 
     @property
+    def available(self) -> bool:
+        # Lås kapaciteten når automatikken er aktiv, så den ikke ændres ved en
+        # fejl midt i en ladning (kapaciteten indgår i den beregnede SoC).
+        return super().available and not self.runtime.enabled
+
+    @property
     def native_value(self) -> float:
         return self.runtime.guest_capacity
 
