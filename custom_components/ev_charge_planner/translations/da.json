@@ -76,11 +76,13 @@
       "charge_power": { "name": "Ladeeffekt" }
     },
     "datetime": {
-      "departure": { "name": "Afrejsetid" }
+      "departure": { "name": "Afrejsetid" },
+      "earliest_start": { "name": "Tidligst start" }
     },
     "switch": {
       "enabled": { "name": "Automatik aktiv" },
-      "observer_mode": { "name": "Observatør-tilstand" }
+      "observer_mode": { "name": "Observatør-tilstand" },
+      "use_earliest_start": { "name": "Brug tidligst-start" }
     },
     "button": {
       "recalculate": { "name": "Genberegn plan" },

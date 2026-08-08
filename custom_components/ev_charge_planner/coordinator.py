@@ -280,6 +280,18 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             return True
         return False
 
+    def _window_start_ms(self) -> int | None:
+        """Ladevindue: tidligst-start (kun i Afgang når slået til). None = ingen grænse."""
+        rt = self.runtime
+        if rt.mode != MODE_DEPARTURE or not rt.use_earliest_start or not rt.earliest_start_iso:
+            return None
+        dep = dt_util.parse_datetime(rt.earliest_start_iso)
+        if dep is None:
+            return None
+        if dep.tzinfo is None:
+            dep = dt_util.as_local(dep)
+        return planner.to_ms(dep)
+
     def _deadline_ms(self) -> int | None:
         rt = self.runtime
         now = dt_util.now()  # lokal, aware
@@ -403,6 +415,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             raw_today=raw_today,
             raw_tomorrow=raw_tomorrow,
             min_block_mins=int(self.entry.options.get("min_block_minutes", 0)),
+            window_start_ms=self._window_start_ms(),
         ))
         _LOGGER.debug(
             "Plan genberegnet: %s blokke, advarsel=%s",

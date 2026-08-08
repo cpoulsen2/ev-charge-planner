@@ -166,6 +166,7 @@ def compute_plan(
     raw_today: list[dict],
     raw_tomorrow: list[dict],
     min_block_mins: int = 0,
+    window_start_ms: int | None = None,
 ) -> PlanResult:
     """Beregn en ladeplan med sliding-window prisoptimering.
 
@@ -186,8 +187,12 @@ def compute_plan(
         result.warning = WARN_NO_PRICES
         return result
 
+    # Nedre grænse: normalt "nu", men et evt. ladevindue kan skubbe starten senere
+    lower_ms = now_ms
+    if window_start_ms is not None and window_start_ms > now_ms:
+        lower_ms = window_start_ms
     prices = [
-        s for s in prices if s.time_ms + SLOT_MS > now_ms and s.time_ms < deadline_ms
+        s for s in prices if s.time_ms + SLOT_MS > lower_ms and s.time_ms < deadline_ms
     ]
 
     energy_needed = capacity_kwh * max(0, target_pct - current_soc) / 100

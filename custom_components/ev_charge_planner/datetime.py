@@ -24,9 +24,10 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: EvcpCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entity = DepartureDateTime(coordinator)
-    entity.entity_id = f"datetime.ev_charge_planner_{entity._evcp_key}"
-    async_add_entities([entity])
+    entities = [DepartureDateTime(coordinator), EarliestStartDateTime(coordinator)]
+    for entity in entities:
+        entity.entity_id = f"datetime.ev_charge_planner_{entity._evcp_key}"
+    async_add_entities(entities)
 
 
 class DepartureDateTime(EvcpEntity, DateTimeEntity):
@@ -52,5 +53,35 @@ class DepartureDateTime(EvcpEntity, DateTimeEntity):
 
     async def async_set_value(self, value: datetime) -> None:
         self.runtime.departure_iso = value.isoformat()
+        await self.coordinator.async_user_changed()
+        self.async_write_ha_state()
+
+
+class EarliestStartDateTime(EvcpEntity, DateTimeEntity):
+    """Ladevindue: tidligst tidspunkt hvor der må lades (Afgang-mode).
+
+    Bruges kun når 'Brug tidligst-start'-kontakten er slået til.
+    """
+
+    _attr_translation_key = "earliest_start"
+    _attr_icon = "mdi:clock-start"
+
+    def __init__(self, coordinator: EvcpCoordinator) -> None:
+        super().__init__(coordinator, "earliest_start")
+
+    @property
+    def native_value(self) -> datetime | None:
+        iso = self.runtime.earliest_start_iso
+        if not iso:
+            return None
+        start = dt_util.parse_datetime(iso)
+        if start is None:
+            return None
+        if start.tzinfo is None:
+            start = dt_util.as_local(start)
+        return dt_util.as_utc(start)
+
+    async def async_set_value(self, value: datetime) -> None:
+        self.runtime.earliest_start_iso = value.isoformat()
         await self.coordinator.async_user_changed()
         self.async_write_ha_state()

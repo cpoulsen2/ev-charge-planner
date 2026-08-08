@@ -19,7 +19,11 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: EvcpCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entities = [EnabledSwitch(coordinator), ObserverModeSwitch(coordinator)]
+    entities = [
+        EnabledSwitch(coordinator),
+        ObserverModeSwitch(coordinator),
+        EarliestStartSwitch(coordinator),
+    ]
     for e in entities:
         e.entity_id = f"switch.ev_charge_planner_{e._evcp_key}"
     async_add_entities(entities)
@@ -72,4 +76,28 @@ class ObserverModeSwitch(EvcpEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         self.runtime.observer_mode = False
         await self.coordinator.async_save()
+        self.async_write_ha_state()
+
+
+class EarliestStartSwitch(EvcpEntity, SwitchEntity):
+    """Begræns Afgang til et ladevindue (lad ikke før 'tidligst start')."""
+
+    _attr_translation_key = "use_earliest_start"
+    _attr_icon = "mdi:clock-start"
+
+    def __init__(self, coordinator: EvcpCoordinator) -> None:
+        super().__init__(coordinator, "use_earliest_start")
+
+    @property
+    def is_on(self) -> bool:
+        return self.runtime.use_earliest_start
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self.runtime.use_earliest_start = True
+        await self.coordinator.async_user_changed()
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self.runtime.use_earliest_start = False
+        await self.coordinator.async_user_changed()
         self.async_write_ha_state()

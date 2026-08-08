@@ -58,6 +58,8 @@ class Runtime:
     guest_capacity: float = DEFAULT_GUEST_CAPACITY_KWH
     charge_power: float = DEFAULT_POWER_KW
     departure_iso: str = ""  # afrejse dato+tid (Afgang) — auto-holdes i fremtiden
+    use_earliest_start: bool = False  # Afgang: begræns til et ladevindue
+    earliest_start_iso: str = ""  # tidligst start (ladevindue), dato+tid
     enabled: bool = False  # master-kontakt (svarer til charger_switch)
     observer_mode: bool = True  # True = beregn+log men rør IKKE laderen
     force_charge: bool = False  # "lad straks" — ignorér plan

@@ -76,11 +76,13 @@
       "charge_power": { "name": "Charge power" }
     },
     "datetime": {
-      "departure": { "name": "Departure time" }
+      "departure": { "name": "Departure time" },
+      "earliest_start": { "name": "Earliest start" }
     },
     "switch": {
       "enabled": { "name": "Automation enabled" },
-      "observer_mode": { "name": "Observer mode" }
+      "observer_mode": { "name": "Observer mode" },
+      "use_earliest_start": { "name": "Use earliest start" }
     },
     "button": {
       "recalculate": { "name": "Recalculate plan" },

@@ -140,6 +140,26 @@ def test_plan_result_serialization_roundtrip():
         assert a.duration_min == b.duration_min
 
 
+def test_window_start_excludes_slots_before_window():
+    # Billigste slot er time 0, men et ladevindue der starter time 2
+    # må ikke vælge noget før time 2 → vælg billigste i [2, 4).
+    res = _plan(
+        raw_today=hourly_prices([0.1, 0.2, 0.9, 0.3]),
+        window_start_ms=to_ms(hours(2)),
+    )
+    assert res.warning == WARN_NONE
+    assert len(res.plan) == 1
+    # Billigste i vinduet [2,4) er time 3 (0.3), ikke time 0 (0.1)
+    assert res.plan[0].start_ms == to_ms(hours(3))
+    assert res.plan[0].avg_price == 0.3
+
+
+def test_window_start_in_past_is_ignored():
+    # Et vindue der allerede er passeret ændrer intet (opfører sig som nu).
+    res = _plan(window_start_ms=to_ms(BASE - timedelta(hours=5)))
+    assert res.plan[0].start_ms == to_ms(hours(1))  # samme som uden vindue
+
+
 def test_min_block_avoids_tiny_blocks():
     # Med min_block_mins=30 må ingen blok være kortere end 2 kvarter
     res = _plan(
