@@ -15,6 +15,7 @@ unit-testes uden en HA-installation.
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 from .const import CONF_PRICE_SENSOR, DOMAIN, PLATFORMS
@@ -25,6 +26,32 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# Frontend-kort der serveres direkte af integrationen (ingen manuel
+# Lovelace-ressource nødvendig — loades automatisk efter genstart)
+_CARD_URL = f"/{DOMAIN}/evcp-time-picker.js"
+_CARD_FILE = "www/evcp-time-picker.js"
+
+
+async def _async_register_frontend(hass: "HomeAssistant") -> None:
+    """Registrér og auto-indlæs det medfølgende tidsvælger-kort.
+
+    Kører kun én gang pr. HA-opstart (uanset antal config entries).
+    """
+    if hass.data.get(f"{DOMAIN}_frontend"):
+        return
+    hass.data[f"{DOMAIN}_frontend"] = True
+
+    from homeassistant.components.http import StaticPathConfig
+
+    path = os.path.join(os.path.dirname(__file__), _CARD_FILE)
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(_CARD_URL, path, False)]
+    )
+
+    from homeassistant.components.frontend import add_extra_js_url
+
+    add_extra_js_url(hass, _CARD_URL)
+
 
 async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool:
     """Sæt en config entry op."""
@@ -32,6 +59,8 @@ async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool
 
     from .coordinator import EvcpCoordinator
     from .models import RuntimeStore
+
+    await _async_register_frontend(hass)
 
     store = RuntimeStore(hass, entry.entry_id)
     await store.load()
