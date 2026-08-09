@@ -48,9 +48,18 @@ async def _async_register_frontend(hass: "HomeAssistant") -> None:
         [StaticPathConfig(_CARD_URL, path, False)]
     )
 
+    # Versions-query bryder browser-cachen når kortet opdateres
     from homeassistant.components.frontend import add_extra_js_url
+    from homeassistant.loader import async_get_integration
 
-    add_extra_js_url(hass, _CARD_URL)
+    version = ""
+    try:
+        integration = await async_get_integration(hass, DOMAIN)
+        version = integration.version or ""
+    except Exception:  # noqa: BLE001 — version er kun til cache-busting
+        pass
+    url = f"{_CARD_URL}?v={version}" if version else _CARD_URL
+    add_extra_js_url(hass, url)
 
 
 async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool:

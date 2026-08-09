@@ -1,16 +1,18 @@
 /**
- * EV Charge Planner — tidsvælger-kort.
+ * EV Charge Planner — dato/tid-vælger-kort.
  *
- * Et lille custom Lovelace-kort der viser et klokkeslæt som et rigtigt
- * <input type="time">. På iPhone/iPad åbner det iOS' eget rulle-hjul.
- * Ved ændring skrives til en `datetime`-entitet, og datoen sættes automatisk
- * til næste gang det klokkeslæt indtræffer (så man kun skal tænke på tiden).
+ * Et lille custom Lovelace-kort der viser en dato+tid som et rigtigt
+ * <input type="datetime-local">. På iPhone/iPad åbner det iOS' eget
+ * rulle-hjul med dato, time og minut. Minutter går i spring af 15 (kvarter).
+ * Ved ændring skrives værdien direkte til en `datetime`-entitet.
  *
  * Konfiguration:
  *   type: custom:evcp-time-picker
  *   entity: datetime.ev_charge_planner_departure
  *   label: "⏰ Afgang"          # valgfri overskrift
  */
+const EVCP_STEP_MIN = 15; // minut-opløsning (kvarter)
+
 class EvcpTimePicker extends HTMLElement {
   setConfig(config) {
     if (!config || !config.entity) {
@@ -21,12 +23,19 @@ class EvcpTimePicker extends HTMLElement {
     }
     this._config = config;
     this._built = false;
+    this._lastState = null;
   }
 
   set hass(hass) {
     this._hass = hass;
     if (!this._built) this._build();
-    this._update();
+    // Perf: opdatér kun DOM når netop denne entitets værdi har ændret sig
+    const st = hass.states[this._config.entity];
+    const state = st ? st.state : null;
+    if (state !== this._lastState) {
+      this._lastState = state;
+      this._update(state);
+    }
   }
 
   getCardSize() {
@@ -37,82 +46,67 @@ class EvcpTimePicker extends HTMLElement {
     return String(n).padStart(2, "0");
   }
 
+  static _toLocalInput(d) {
+    const z = EvcpTimePicker._z;
+    return (
+      `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}` +
+      `T${z(d.getHours())}:${z(d.getMinutes())}`
+    );
+  }
+
   _build() {
     const root = document.createElement("ha-card");
-    root.style.padding = "10px 16px";
+    root.style.padding = "12px 16px";
 
-    const row = document.createElement("div");
-    row.style.cssText =
-      "display:flex;align-items:center;justify-content:space-between;gap:12px;";
-
-    const left = document.createElement("div");
     const label = document.createElement("div");
-    label.style.cssText = "font-size:13px;opacity:0.65;font-weight:600;";
-    label.textContent = this._config.label || "Tidspunkt";
-    const day = document.createElement("div");
-    day.style.cssText =
-      "font-size:12px;opacity:0.45;text-transform:capitalize;min-height:14px;";
-    left.appendChild(label);
-    left.appendChild(day);
+    label.style.cssText =
+      "font-size:13px;opacity:0.65;font-weight:600;margin-bottom:8px;";
+    label.textContent = this._config.label || "Dato / tid";
 
     const input = document.createElement("input");
-    input.type = "time";
+    input.type = "datetime-local";
+    input.step = String(EVCP_STEP_MIN * 60); // sekunder → 15-min spring
     input.style.cssText =
-      "font-size:30px;font-weight:600;color:inherit;" +
-      "background:rgba(127,127,127,0.15);border:none;border-radius:12px;" +
-      "padding:6px 14px;text-align:center;font-variant-numeric:tabular-nums;" +
-      "-webkit-appearance:none;appearance:none;cursor:pointer;";
-    // Ændringen håndteres direkte af det ægte DOM-element — ingen sanitizer imellem
+      "width:100%;box-sizing:border-box;font-size:22px;font-weight:600;" +
+      "color:inherit;background:rgba(127,127,127,0.15);border:none;" +
+      "border-radius:12px;padding:10px 14px;text-align:center;" +
+      "font-variant-numeric:tabular-nums;-webkit-appearance:none;" +
+      "appearance:none;cursor:pointer;";
     input.addEventListener("change", () => this._onChange(input.value));
 
-    row.appendChild(left);
-    row.appendChild(input);
-    root.appendChild(row);
+    root.appendChild(label);
+    root.appendChild(input);
     this.innerHTML = "";
     this.appendChild(root);
 
-    this._els = { day, input };
+    this._els = { input };
     this._built = true;
   }
 
-  _update() {
-    if (!this._hass || !this._els) return;
-    const st = this._hass.states[this._config.entity];
-    const raw = st ? st.state : null;
+  _update(state) {
+    if (!this._els) return;
     const d =
-      raw && raw !== "unknown" && raw !== "unavailable" ? new Date(raw) : null;
-
+      state && state !== "unknown" && state !== "unavailable"
+        ? new Date(state)
+        : null;
     // Overskriv ikke feltet mens brugeren har det åbent/i fokus
     if (document.activeElement !== this._els.input) {
-      const z = EvcpTimePicker._z;
-      this._els.input.value = d ? `${z(d.getHours())}:${z(d.getMinutes())}` : "";
+      this._els.input.value = d ? EvcpTimePicker._toLocalInput(d) : "";
     }
-    this._els.day.textContent = d
-      ? d.toLocaleDateString("da-DK", {
-          weekday: "long",
-          day: "numeric",
-          month: "short",
-        })
-      : "";
   }
 
   _onChange(value) {
     if (!value || !this._hass) return;
-    const parts = value.split(":");
-    if (parts.length < 2) return;
-    const h = parseInt(parts[0], 10);
-    const m = parseInt(parts[1], 10);
-    if (isNaN(h) || isNaN(m)) return;
-
-    const now = new Date();
-    const t = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0, 0);
-    // Næste gang klokkeslættet indtræffer (datoen regnes ud automatisk)
-    if (t.getTime() <= now.getTime()) t.setDate(t.getDate() + 1);
+    // value er lokal tid uden tidszone, fx "2026-08-14T07:07"
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return;
+    // Rund til nærmeste kvarter (håndterer også desktop-input uden step)
+    d.setMinutes(Math.round(d.getMinutes() / EVCP_STEP_MIN) * EVCP_STEP_MIN, 0, 0);
 
     const z = EvcpTimePicker._z;
     const iso =
-      `${t.getFullYear()}-${z(t.getMonth() + 1)}-${z(t.getDate())} ` +
-      `${z(t.getHours())}:${z(t.getMinutes())}:00`;
+      `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())} ` +
+      `${z(d.getHours())}:${z(d.getMinutes())}:00`;
 
     this._hass.callService("datetime", "set_value", {
       entity_id: this._config.entity,
@@ -126,8 +120,9 @@ if (!customElements.get("evcp-time-picker")) {
   window.customCards = window.customCards || [];
   window.customCards.push({
     type: "evcp-time-picker",
-    name: "EV Charge Planner — Tidsvælger",
-    description: "Klokkeslæt-vælger (iOS-hjul) til EV Charge Planner datetime-entiteter.",
+    name: "EV Charge Planner — Dato/tid-vælger",
+    description:
+      "Dato+tid-vælger (iOS-hjul, 15-min spring) til EV Charge Planner datetime-entiteter.",
   });
   console.info("%c EVCP-TIME-PICKER ⚙️ loaded", "color:#4ADE80");
 }
