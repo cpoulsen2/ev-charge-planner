@@ -28,7 +28,6 @@ _LOGGER = logging.getLogger(__name__)
 
 # Frontend-kort der serveres direkte af integrationen (ingen manuel
 # Lovelace-ressource nødvendig — loades automatisk efter genstart)
-_CARD_URL = f"/{DOMAIN}/evcp-time-picker.js"
 _CARD_FILE = "www/evcp-time-picker.js"
 
 
@@ -36,30 +35,34 @@ async def _async_register_frontend(hass: "HomeAssistant") -> None:
     """Registrér og auto-indlæs det medfølgende tidsvælger-kort.
 
     Kører kun én gang pr. HA-opstart (uanset antal config entries).
+
+    Versionen lægges ind i selve fil-stien (…-<version>.js), så det er en
+    HELT ny URL ved hver opdatering. Så kan browseren ikke servere en
+    forældet cachet version — den er tvunget til at hente den nye.
     """
     if hass.data.get(f"{DOMAIN}_frontend"):
         return
     hass.data[f"{DOMAIN}_frontend"] = True
 
-    from homeassistant.components.http import StaticPathConfig
-
-    path = os.path.join(os.path.dirname(__file__), _CARD_FILE)
-    await hass.http.async_register_static_paths(
-        [StaticPathConfig(_CARD_URL, path, False)]
-    )
-
-    # Versions-query bryder browser-cachen når kortet opdateres
     from homeassistant.components.frontend import add_extra_js_url
+    from homeassistant.components.http import StaticPathConfig
     from homeassistant.loader import async_get_integration
 
     version = ""
     try:
         integration = await async_get_integration(hass, DOMAIN)
-        version = integration.version or ""
-    except Exception:  # noqa: BLE001 — version er kun til cache-busting
+        version = str(integration.version or "").replace("/", "_")
+    except Exception:  # noqa: BLE001 — versionen er kun til cache-busting
         pass
-    url = f"{_CARD_URL}?v={version}" if version else _CARD_URL
-    add_extra_js_url(hass, url)
+
+    suffix = f"-{version}" if version else ""
+    card_url = f"/{DOMAIN}/evcp-time-picker{suffix}.js"
+    path = os.path.join(os.path.dirname(__file__), _CARD_FILE)
+
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(card_url, path, False)]
+    )
+    add_extra_js_url(hass, card_url)
 
 
 async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool:
