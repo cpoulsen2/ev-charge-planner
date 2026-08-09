@@ -1,10 +1,10 @@
 /**
  * EV Charge Planner — dato/tid-vælger-kort.
  *
- * Et lille custom Lovelace-kort der viser en dato+tid som et rigtigt
- * <input type="datetime-local">. På iPhone/iPad åbner det iOS' eget
- * rulle-hjul med dato, time og minut. Minutter går i spring af 15 (kvarter).
- * Ved ændring skrives værdien direkte til en `datetime`-entitet.
+ * Et lille custom Lovelace-kort med to felter: dato øverst og klokkeslæt
+ * nedenunder. Begge er rigtige HTML-inputs, så på iPhone/iPad åbner iOS'
+ * eget rulle-hjul (dato-hjul hhv. tids-hjul). Minutter går i spring af 15.
+ * Ved ændring skrives den kombinerede dato+tid direkte til en `datetime`-entitet.
  *
  * Konfiguration:
  *   type: custom:evcp-time-picker
@@ -39,22 +39,15 @@ class EvcpTimePicker extends HTMLElement {
   }
 
   getCardSize() {
-    return 1;
+    return 2;
   }
 
   static _z(n) {
     return String(n).padStart(2, "0");
   }
 
-  static _toLocalInput(d) {
-    const z = EvcpTimePicker._z;
-    return (
-      `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}` +
-      `T${z(d.getHours())}:${z(d.getMinutes())}`
-    );
-  }
-
   _build() {
+    const z = EvcpTimePicker._z;
     const root = document.createElement("ha-card");
     root.style.padding = "12px 16px";
 
@@ -63,23 +56,31 @@ class EvcpTimePicker extends HTMLElement {
       "font-size:13px;opacity:0.65;font-weight:600;margin-bottom:8px;";
     label.textContent = this._config.label || "Dato / tid";
 
-    const input = document.createElement("input");
-    input.type = "datetime-local";
-    input.step = String(EVCP_STEP_MIN * 60); // sekunder → 15-min spring
-    input.style.cssText =
+    const baseInput =
       "width:100%;box-sizing:border-box;font-size:22px;font-weight:600;" +
       "color:inherit;background:rgba(127,127,127,0.15);border:none;" +
       "border-radius:12px;padding:10px 14px;text-align:center;" +
       "font-variant-numeric:tabular-nums;-webkit-appearance:none;" +
       "appearance:none;cursor:pointer;";
-    input.addEventListener("change", () => this._onChange(input.value));
+
+    const dateInput = document.createElement("input");
+    dateInput.type = "date";
+    dateInput.style.cssText = baseInput + "margin-bottom:8px;";
+    dateInput.addEventListener("change", () => this._onChange());
+
+    const timeInput = document.createElement("input");
+    timeInput.type = "time";
+    timeInput.step = String(EVCP_STEP_MIN * 60); // sekunder → 15-min spring
+    timeInput.style.cssText = baseInput;
+    timeInput.addEventListener("change", () => this._onChange());
 
     root.appendChild(label);
-    root.appendChild(input);
+    root.appendChild(dateInput);
+    root.appendChild(timeInput);
     this.innerHTML = "";
     this.appendChild(root);
 
-    this._els = { input };
+    this._els = { dateInput, timeInput };
     this._built = true;
   }
 
@@ -89,17 +90,32 @@ class EvcpTimePicker extends HTMLElement {
       state && state !== "unknown" && state !== "unavailable"
         ? new Date(state)
         : null;
-    // Overskriv ikke feltet mens brugeren har det åbent/i fokus
-    if (document.activeElement !== this._els.input) {
-      this._els.input.value = d ? EvcpTimePicker._toLocalInput(d) : "";
+    const active = document.activeElement;
+    const z = EvcpTimePicker._z;
+    // Overskriv ikke et felt mens brugeren har det åbent/i fokus
+    if (active !== this._els.dateInput) {
+      this._els.dateInput.value = d
+        ? `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`
+        : "";
+    }
+    if (active !== this._els.timeInput) {
+      this._els.timeInput.value = d
+        ? `${z(d.getHours())}:${z(d.getMinutes())}`
+        : "";
     }
   }
 
-  _onChange(value) {
-    if (!value || !this._hass) return;
-    // value er lokal tid uden tidszone, fx "2026-08-14T07:07"
-    const d = new Date(value);
-    if (isNaN(d.getTime())) return;
+  _onChange() {
+    if (!this._hass || !this._els) return;
+    const dateVal = this._els.dateInput.value; // "YYYY-MM-DD"
+    const timeVal = this._els.timeInput.value; // "HH:MM"
+    if (!dateVal || !timeVal) return; // vent til begge er sat
+
+    const dp = dateVal.split("-").map((n) => parseInt(n, 10));
+    const tp = timeVal.split(":").map((n) => parseInt(n, 10));
+    if (dp.length < 3 || tp.length < 2 || dp.concat(tp).some(isNaN)) return;
+
+    const d = new Date(dp[0], dp[1] - 1, dp[2], tp[0], tp[1], 0, 0);
     // Rund til nærmeste kvarter (håndterer også desktop-input uden step)
     d.setMinutes(Math.round(d.getMinutes() / EVCP_STEP_MIN) * EVCP_STEP_MIN, 0, 0);
 
