@@ -393,10 +393,19 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             self.plan_result = planner.plan_result_from_dict(data)
             _LOGGER.debug("Plan gendannet fra lager: %s blokke", len(self.plan_result.plan))
 
+    def is_charger_connected(self) -> bool:
+        """True når laderen er sat i en bil (uanset hvilken connected-tilstand)."""
+        return self._charger_mode() != CM_DISCONNECTED
+
     def recalculate(self) -> None:
         """Genberegn ladeplanen ud fra nuværende kontroller og priser."""
         rt = self.runtime
         if rt.active_vehicle == CHOOSE_VEHICLE:
+            self._set_plan(None)
+            return
+        # Laderen ikke sat i nogen bil → ingen plan og ingen notifikationer.
+        # (Ellers ville et bilvalg udløse "ikke nok tid" selvom intet er tilsluttet.)
+        if not self.is_charger_connected():
             self._set_plan(None)
             return
         deadline_ms = self._deadline_ms()
@@ -791,6 +800,22 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         if prev == now:
             return
         rt = self.runtime
+        # Frakoblet: laderen er taget ud af bilen → fravælg bilen og nulstil,
+        # så en gammel valgt bil ikke hænger ved og udløser beregning/notifikationer.
+        if now == CM_DISCONNECTED and prev not in (None, CM_DISCONNECTED):
+            _LOGGER.info("Laderen frakoblet (%s → %s) — fravælger bil", prev, now)
+            rt.session_complete = False
+            rt.force_charge = False
+            rt.charge_state = "idle"
+            rt.zero_power_ticks = 0
+            rt.charge_start_notified = False
+            rt.not_enough_time_notified = False
+            rt.last_plan_signature = ""
+            rt.active_vehicle = CHOOSE_VEHICLE
+            rt.enabled = False
+            self._set_plan(None)
+            await self.async_save()
+            return
         is_fresh_plugin = prev in _NEW_SESSION_FROM and now in (
             CM_REQUESTING,
             CM_CHARGING,

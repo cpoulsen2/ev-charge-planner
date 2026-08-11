@@ -50,6 +50,10 @@ class ActiveVehicleSelect(EvcpEntity, SelectEntity):
         return self.runtime.active_vehicle
 
     async def async_select_option(self, option: str) -> None:
+        # Kan ikke vælge en bil når laderen ikke er sat i (kun "Vælg bil" tilladt)
+        if option != CHOOSE_VEHICLE and not self.coordinator.is_charger_connected():
+            self.async_write_ha_state()  # gendan visningen (afvis valget)
+            return
         if option != self.runtime.active_vehicle:
             self.runtime.active_vehicle = option
             # Nulstil session-anker så den nye bil starter rent (ingen arvet energi)
