@@ -14,6 +14,7 @@ from custom_components.ev_charge_planner.planner import (
     WARN_NO_PRICES,
     WARN_NONE,
     WARN_NOT_ENOUGH_TIME,
+    compute_force_plan,
     compute_plan,
     expand_mixed,
     plan_result_from_dict,
@@ -158,6 +159,35 @@ def test_window_start_in_past_is_ignored():
     # Et vindue der allerede er passeret ændrer intet (opfører sig som nu).
     res = _plan(window_start_ms=to_ms(BASE - timedelta(hours=5)))
     assert res.plan[0].start_ms == to_ms(hours(1))  # samme som uden vindue
+
+
+def test_force_plan_single_block_from_now():
+    # 10 kWh nødvendig ved 10 kW → 1 times blok der starter NU
+    res = compute_force_plan(
+        now_ms=to_ms(BASE),
+        target_pct=100.0,
+        current_soc=0.0,
+        capacity_kwh=10.0,
+        power_kw=10.0,
+    )
+    assert res.warning == WARN_NONE
+    assert len(res.plan) == 1
+    block = res.plan[0]
+    assert block.start_ms == to_ms(BASE)
+    assert block.end_ms == to_ms(hours(1))  # 1 time
+    assert abs(block.energy_kwh - 10.0) < 1e-9
+
+
+def test_force_plan_already_at_target():
+    res = compute_force_plan(
+        now_ms=to_ms(BASE),
+        target_pct=80.0,
+        current_soc=80.0,
+        capacity_kwh=77.0,
+        power_kw=11.0,
+    )
+    assert res.warning == WARN_ALREADY_AT_TARGET
+    assert res.plan == []
 
 
 def test_min_block_avoids_tiny_blocks():

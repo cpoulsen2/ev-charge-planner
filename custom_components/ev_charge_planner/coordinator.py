@@ -408,6 +408,17 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         if not self.is_charger_connected():
             self._set_plan(None)
             return
+        # "Lad straks": vis en plan der starter NU (så grafen ikke hænger på det gamle
+        # skema), i stedet for prisoptimerede fremtidige slots.
+        if rt.force_charge:
+            self._set_plan(planner.compute_force_plan(
+                now_ms=planner.to_ms(dt_util.utcnow()),
+                target_pct=rt.target_soc,
+                current_soc=self._live_soc(),
+                capacity_kwh=self._capacity_for(rt.active_vehicle),
+                power_kw=rt.charge_power,
+            ))
+            return
         deadline_ms = self._deadline_ms()
         if deadline_ms is None:
             self._set_plan(None)

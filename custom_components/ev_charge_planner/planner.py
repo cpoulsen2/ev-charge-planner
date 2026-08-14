@@ -308,6 +308,46 @@ def compute_plan(
     return result
 
 
+def compute_force_plan(
+    *,
+    now_ms: int,
+    target_pct: float,
+    current_soc: float,
+    capacity_kwh: float,
+    power_kw: float,
+    avg_price: float = 0.0,
+) -> PlanResult:
+    """Byg en "lad straks"-plan: én sammenhængende blok fra nu indtil målet er nået
+    ved fuld effekt (ignorerer priser). Bruges når force_charge er aktiv, så grafen
+    viser at der lades NU i stedet for de gamle skemalagte slots.
+    """
+    power = power_kw or 11
+    result = PlanResult(
+        deadline_ms=now_ms,
+        current_soc=current_soc,
+        target_pct=target_pct,
+    )
+    energy_needed = capacity_kwh * max(0, target_pct - current_soc) / 100
+    result.energy_needed = energy_needed
+    if energy_needed <= 0:
+        result.warning = WARN_ALREADY_AT_TARGET
+        return result
+    duration_h = energy_needed / power
+    end_ms = now_ms + int(round(duration_h * 3600 * 1000))
+    block = PlanBlock(
+        start_ms=now_ms,
+        end_ms=end_ms,
+        avg_price=avg_price,
+        energy_kwh=energy_needed,
+        cost=energy_needed * avg_price,
+        duration_min=int(math.ceil(duration_h * 60)),
+    )
+    result.plan = [block]
+    result.estimated_cost = block.cost
+    result.slots_needed = int(math.ceil(duration_h * 4))
+    return result
+
+
 def plan_result_to_dict(pr: PlanResult) -> dict:
     """Serialisér en PlanResult (så planen kan gemmes og overleve genstart)."""
     return {
