@@ -12,7 +12,6 @@ men laderen røres ikke, før brugeren slår observatør-tilstand fra.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -22,7 +21,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from . import planner
+from . import guards, planner
 from .const import (
     ACT_BLOCKED,
     ACT_CHARGING,
@@ -31,6 +30,7 @@ from .const import (
     ACT_START,
     ACT_TARGET_REACHED,
     ACT_WAITING,
+    AUTHORIZE_MIN_INTERVAL,
     CAR_SIDE_STOP_TICKS,
     CHARGE_POWER_THRESHOLD_KW,
     CHOOSE_VEHICLE,
@@ -55,6 +55,7 @@ from .const import (
     MODE_DEPARTURE,
     MODE_STANDARD,
     STANDARD_DEADLINE_HOUR,
+    START_FAILED_TIMEOUT,
     UPDATE_INTERVAL,
 )
 from .models import Runtime, RuntimeStore, Vehicle
@@ -108,9 +109,8 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         self._prev_charger_mode: str | None = store.runtime.prev_charger_mode or None
         self._soc_cache_dirty = False
         self._last_soc_source = "manual"
-        self._authorize_sent = False  # autorisér kun én gang pr. requesting-episode
-        self._requesting_ticks = 0
-        self._start_commanded_at: datetime | None = None
+        # Authorize-tilstand ligger nu i Runtime (persisteret), så en reload midt i
+        # en requesting-episode ikke udløser et nyt authorize-tryk.
 
     # ---------- persistens ----------
 
@@ -479,17 +479,9 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             rt.prev_charger_mode = mode  # persistér så genstart kender sidste mode
             await self.async_save()
 
-        # Autorisations-guard: nulstil når laderen ikke længere venter på autorisation.
-        # Sidder den fast i requesting, tillad ét genforsøg efter ~3 min.
-        if mode == CM_REQUESTING:
-            self._requesting_ticks += 1
-            if self._requesting_ticks >= 3:
-                self._authorize_sent = False
-                self._requesting_ticks = 0
-        else:
-            self._authorize_sent = False
-            self._requesting_ticks = 0
-
+        # Bemærk: authorize-guarden nulstilles IKKE her længere. Én-gang-pr-episode
+        # styres via rt.authorize_done, som kun genarmeres ved ægte session-overgange
+        # (_handle_mode_transition) eller eksplicit brugerhandling (on_user_restart).
         decision = self._decide(mode)
 
         # Notifikation: ladning faktisk startet
@@ -582,6 +574,11 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         )
         should_be_charging = rt.force_charge or in_slot
 
+        # Giv-op-timer (udfaldsdrevet): venter vi forgæves på strøm i et aktivt slot?
+        # Kun når vi faktisk styrer laderen (ikke observatør).
+        if not observer:
+            self._update_start_failure_timer(should_be_charging, power)
+
         # 5) Ramp-safe car-side stop tilstandsmaskine
         no_power = mode != CM_DISCONNECTED and power < CHARGE_POWER_THRESHOLD_KW
         if not should_be_charging:
@@ -627,12 +624,12 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         # 7) Force charge
         if rt.force_charge:
             if not really_charging:
-                self._do_start(mode, observer)
+                outcome = self._do_start(mode, observer)
                 return dec(
-                    ACT_START,
-                    "Lad straks (force) — starter ladning",
+                    ACT_WAITING if outcome == "gave_up" else ACT_START,
+                    self._start_reason("Lad straks (force)", outcome),
                     live_soc=live_soc,
-                    actuated=not observer,
+                    actuated=outcome in ("authorized", "resumed"),
                 )
             return dec(
                 ACT_CHARGING,
@@ -657,13 +654,13 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         # 9) I slot?
         if in_slot:
             if not really_charging:
-                self._do_start(mode, observer)
+                outcome = self._do_start(mode, observer)
                 return dec(
-                    ACT_START,
-                    "I ladeslot — starter ladning",
+                    ACT_WAITING if outcome == "gave_up" else ACT_START,
+                    self._start_reason("I ladeslot", outcome),
                     in_slot=True,
                     live_soc=live_soc,
-                    actuated=not observer,
+                    actuated=outcome in ("authorized", "resumed"),
                 )
             return dec(
                 ACT_CHARGING,
@@ -694,25 +691,92 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
 
     # ---------- aktuering ----------
 
-    def _do_start(self, mode: str, observer: bool) -> None:
+    def _do_start(self, mode: str, observer: bool) -> str:
+        """Forsøg at starte ladning. Returnerer udfaldet (til status/UI):
+        ``authorized`` | ``resumed`` | ``suppressed`` | ``gave_up``.
+        """
         if observer:
             _LOGGER.info("[OBSERVER] Ville starte ladning (mode=%s)", mode)
-            return
-        # Husk hvornår vi selv kommanderede en start, så laderens efterfølgende
-        # finished→requesting ikke fejltolkes som et bilskifte (Fejl 2).
-        self._start_commanded_at = dt_util.utcnow()
-        # Autorisér kun når laderen venter på det (connected_requesting) OG vi ikke
-        # allerede har autoriseret i denne episode — undgår gentagne authorize-tryk.
-        need_auth = mode == CM_REQUESTING and not self._authorize_sent
-        if need_auth:
-            self._authorize_sent = True
-        self.hass.async_create_task(self._start_charging(need_auth))
+            return "suppressed"
+        rt = self.runtime
+        now = dt_util.utcnow()
+        # Husk seneste kommanderede start (persisteret) — så laderens efterfølgende
+        # finished→requesting ikke fejltolkes som et bilskifte.
+        rt.start_commanded_iso = now.isoformat()
+        last_ms = planner.to_ms(rt.last_authorize_iso) if rt.last_authorize_iso else None
+        if guards.may_authorize(
+            is_requesting=(mode == CM_REQUESTING),
+            authorize_done=rt.authorize_done,
+            gave_up=rt.start_failed_notified,
+            last_authorize_ms=last_ms,
+            now_ms=planner.to_ms(now),
+            min_interval_ms=int(AUTHORIZE_MIN_INTERVAL.total_seconds() * 1000),
+        ):
+            rt.authorize_done = True
+            rt.last_authorize_iso = now.isoformat()
+            self.hass.async_create_task(self.async_save())
+            self.hass.async_create_task(self._press(CONF_AUTHORIZE_BUTTON))
+            _LOGGER.info("Authorize sendt (mode=%s)", mode)
+            return "authorized"
+        if mode != CM_REQUESTING:
+            # resume er kun gyldig/tilgængelig når vi IKKE står i requesting
+            self.hass.async_create_task(self._press(CONF_RESUME_BUTTON))
+            return "resumed"
+        # requesting, men authorize undertrykt (allerede sendt / backstop / giv-op)
+        return "gave_up" if rt.start_failed_notified else "suppressed"
 
-    async def _start_charging(self, authorize: bool) -> None:
-        if authorize:
-            await self._press(CONF_AUTHORIZE_BUTTON)
-            await asyncio.sleep(5)
-        await self._press(CONF_RESUME_BUTTON)
+    def _start_reason(self, prefix: str, outcome: str) -> str:
+        return {
+            "authorized": f"{prefix} — authorize sendt, afventer laderen",
+            "resumed": f"{prefix} — genoptager ladning",
+            "suppressed": f"{prefix} — afventer laderen",
+            "gave_up": f"{prefix} — kunne ikke starte, tjek laderen",
+        }.get(outcome, prefix)
+
+    def _update_start_failure_timer(self, should_be_charging: bool, power: float) -> None:
+        """Udfaldsdrevet giv-op: notificér én gang hvis vi venter forgæves på strøm."""
+        rt = self.runtime
+        now = dt_util.utcnow()
+        wait_ms = (
+            planner.to_ms(rt.start_wait_since_iso) if rt.start_wait_since_iso else None
+        )
+        new_wait, should_notify = guards.start_failure_state(
+            should_be_charging=should_be_charging,
+            power_flowing=power > CHARGE_POWER_THRESHOLD_KW,
+            wait_since_ms=wait_ms,
+            now_ms=planner.to_ms(now),
+            timeout_ms=int(START_FAILED_TIMEOUT.total_seconds() * 1000),
+            already_notified=rt.start_failed_notified,
+        )
+        if new_wait is None:
+            # Lader nu, eller ikke i et aktivt slot → nulstil timer + giv-op-flag
+            if rt.start_wait_since_iso or rt.start_failed_notified:
+                rt.start_wait_since_iso = ""
+                rt.start_failed_notified = False
+                self.hass.async_create_task(self.async_save())
+            return
+        if not rt.start_wait_since_iso:
+            rt.start_wait_since_iso = now.isoformat()
+            self.hass.async_create_task(self.async_save())
+        if should_notify:
+            rt.start_failed_notified = True
+            self._notify(
+                "⚠️ Kunne ikke starte ladning",
+                "Laderen svarer ikke. Tag stikket ud og i igen, eller tryk "
+                "deauthorize på laderen.",
+                "notify_not_enough_time",
+            )
+            self.hass.async_create_task(self.async_save())
+
+    def on_user_restart(self) -> None:
+        """Eksplicit brugerhandling (Lad straks / master-kontakt slået til):
+        genarmér authorize. Rydder IKKE backstoppen (``last_authorize_iso``) —
+        to "Lad straks"-tryk i træk må ikke kunne genskabe dobbelt-authorize-låsen.
+        """
+        rt = self.runtime
+        rt.authorize_done = False
+        rt.start_wait_since_iso = ""
+        rt.start_failed_notified = False
 
     def _do_stop(self, observer: bool) -> None:
         if observer:
@@ -723,6 +787,12 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
     async def _press(self, conf_key: str) -> None:
         entity_id = self._cfg(conf_key)
         if not entity_id:
+            return
+        st = self.hass.states.get(entity_id)
+        # Drop KUN hvis entiteten reelt er utilgængelig. IKKE på "unknown" — en
+        # aldrig-trykket knap er "unknown" men fuldt brugbar (fx stop-knappen).
+        if st is None or st.state == "unavailable":
+            _LOGGER.debug("Springer tryk over — %s utilgængelig", entity_id)
             return
         await self.hass.services.async_call(
             "button", "press", {"entity_id": entity_id}, blocking=False
@@ -813,6 +883,13 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             rt.last_plan_signature = ""
             rt.active_vehicle = CHOOSE_VEHICLE
             rt.enabled = False
+            # Kabel ude er den ENESTE betingelse der oplåser Zaptec'en → nulstil ALT
+            # authorize-relateret, inkl. den hårde backstop.
+            rt.authorize_done = False
+            rt.last_authorize_iso = ""
+            rt.start_commanded_iso = ""
+            rt.start_wait_since_iso = ""
+            rt.start_failed_notified = False
             self._set_plan(None)
             await self.async_save()
             return
@@ -823,11 +900,17 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         is_car_swap = prev == CM_FINISHED and now == CM_REQUESTING
         # Undertryk hvis vi selv lige har kommanderet en start: laderen vågner så i
         # requesting af sig selv. Et ægte bilskifte kræver at nogen rører kablet.
-        if is_car_swap and self._start_commanded_at is not None:
-            since = (dt_util.utcnow() - self._start_commanded_at).total_seconds()
-            if since < 300:
-                _LOGGER.debug("Ignorerer finished→requesting: egen start for %ss siden", int(since))
-                is_car_swap = False
+        # (start_commanded_iso er persisteret, så en reload ikke fejltolker en flap.)
+        if is_car_swap and rt.start_commanded_iso:
+            last = dt_util.parse_datetime(rt.start_commanded_iso)
+            if last is not None:
+                since = (dt_util.utcnow() - last).total_seconds()
+                if since < 300:
+                    _LOGGER.debug(
+                        "Ignorerer finished→requesting: egen start for %ss siden",
+                        int(since),
+                    )
+                    is_car_swap = False
         if is_fresh_plugin or is_car_swap:
             _LOGGER.info("Ny session (%s → %s) — nulstiller", prev, now)
             rt.session_complete = False
@@ -840,6 +923,11 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             rt.session_baseline_kwh = self._session_energy()
             rt.active_vehicle = CHOOSE_VEHICLE
             rt.enabled = False
+            # Genarmér authorize for den nye session — men IKKE backstoppen
+            # (last_authorize_iso), som kun ryddes ved reel disconnect.
+            rt.authorize_done = False
+            rt.start_wait_since_iso = ""
+            rt.start_failed_notified = False
             self._set_plan(None)
             self._notify(
                 "🔌 Bil tilsluttet",

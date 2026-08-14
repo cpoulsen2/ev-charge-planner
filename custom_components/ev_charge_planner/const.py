@@ -37,6 +37,10 @@ STANDARD_DEADLINE_HOUR = 6  # Standard-mode: klar inden kl. 06:00
 CHARGE_POWER_THRESHOLD_KW = 0.1  # under dette regnes som "ingen strøm flyder"
 CAR_SIDE_STOP_TICKS = 4  # antal minutter med 0 W efter ladning før "bilen stoppede selv"
 
+# --- Authorize-styring (Zaptec låser på dubletter — se guards.py) ---
+AUTHORIZE_MIN_INTERVAL = timedelta(minutes=3)  # hård backstop mellem to authorize-tryk
+START_FAILED_TIMEOUT = timedelta(minutes=5)  # giv op + notificér efter dette uden strøm i slot
+
 # --- Config entry: data (fast opsætning) ---
 CONF_PRICE_SENSOR = "price_sensor"
 CONF_TOMORROW_SENSOR = "tomorrow_sensor"  # valgfri: sensor med morgendagens priser

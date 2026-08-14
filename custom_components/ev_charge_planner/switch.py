@@ -42,6 +42,8 @@ class EnabledSwitch(EvcpEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         self.runtime.enabled = True
+        # Eksplicit brugerhandling → genarmér authorize (backstop bevares)
+        self.coordinator.on_user_restart()
         await self.coordinator.async_user_changed()
         self.async_write_ha_state()
 

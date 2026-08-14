@@ -80,6 +80,13 @@ class Runtime:
     plan_data: dict = field(default_factory=dict)
     prev_charger_mode: str = ""
 
+    # --- Authorize-styring (persisteret, så reload ikke udløser et nyt authorize) ---
+    authorize_done: bool = False  # authorize sendt i denne requesting-episode
+    last_authorize_iso: str = ""  # sidste authorize-tidspunkt — ryddes KUN ved disconnect
+    start_commanded_iso: str = ""  # sidste kommanderede start (flap-undertrykkelse)
+    start_wait_since_iso: str = ""  # udfaldsdrevet giv-op-timer: hvornår vi begyndte at vente
+    start_failed_notified: bool = False  # giv-op-notifikation sendt (én gang)
+
     def to_dict(self) -> dict:
         return asdict(self)
 

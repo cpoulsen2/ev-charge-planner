@@ -50,6 +50,8 @@ class ForceChargeButton(EvcpEntity, ButtonEntity):
     async def async_press(self) -> None:
         self.runtime.force_charge = True
         self.runtime.enabled = True
+        # Eksplicit brugerhandling → genarmér authorize (backstop bevares)
+        self.coordinator.on_user_restart()
         await self.coordinator.async_user_changed()
 
 
