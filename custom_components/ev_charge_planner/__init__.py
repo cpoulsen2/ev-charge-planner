@@ -37,14 +37,20 @@ _LOGGER = logging.getLogger(__name__)
 _CARD_FILE = "www/evcp-time-picker.js"
 
 
+_CARD_URL = f"/{DOMAIN}/evcp-time-picker.js"
+
+
 async def _async_register_frontend(hass: "HomeAssistant") -> None:
     """Registrér og auto-indlæs det medfølgende tidsvælger-kort.
 
     Kører kun én gang pr. HA-opstart (uanset antal config entries).
 
-    Versionen lægges ind i selve fil-stien (…-<version>.js), så det er en
-    HELT ny URL ved hver opdatering. Så kan browseren ikke servere en
-    forældet cachet version — den er tvunget til at hente den nye.
+    STABIL fil-sti + versions-query (…evcp-time-picker.js?v=<version>):
+    - Selv en forældet, service-worker-cachet app-skal peger på en URL der
+      ALTID findes → aldrig 404 → aldrig "Configuration error" (i modsætning
+      til en versioneret sti, hvor en gammel URL ikke længere serveres).
+    - Query'en skifter ved hver opdatering, så friske skaller henter ny JS.
+    - cache_headers=False, så indholdet revalideres.
     """
     if hass.data.get(f"{DOMAIN}_frontend"):
         return
@@ -61,14 +67,11 @@ async def _async_register_frontend(hass: "HomeAssistant") -> None:
     except Exception:  # noqa: BLE001 — versionen er kun til cache-busting
         pass
 
-    suffix = f"-{version}" if version else ""
-    card_url = f"/{DOMAIN}/evcp-time-picker{suffix}.js"
     path = os.path.join(os.path.dirname(__file__), _CARD_FILE)
-
     await hass.http.async_register_static_paths(
-        [StaticPathConfig(card_url, path, False)]
+        [StaticPathConfig(_CARD_URL, path, False)]
     )
-    add_extra_js_url(hass, card_url)
+    add_extra_js_url(hass, f"{_CARD_URL}?v={version}" if version else _CARD_URL)
 
 
 async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool:
