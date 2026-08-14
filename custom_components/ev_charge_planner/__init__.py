@@ -18,7 +18,13 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
-from .const import CONF_PRICE_SENSOR, DOMAIN, PLATFORMS
+from .const import (
+    CONF_CHARGE_POWER_SENSOR,
+    CONF_CHARGER_MODE_SENSOR,
+    CONF_PRICE_SENSOR,
+    DOMAIN,
+    PLATFORMS,
+)
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -96,6 +102,26 @@ async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool
 
         entry.async_on_unload(
             async_track_state_change_event(hass, [price_sensor], _on_price_change)
+        )
+
+    # Reagér straks når laderen skifter mode/effekt i stedet for at vente på næste
+    # 60-sekunders tick. Kritisk for start-latens: efter et resume-tryk skifter
+    # laderen finished→requesting, hvor authorize først er muligt — uden denne lytter
+    # ventede _decide() op til 60 s. Bruger den debouncede request_refresh (leading-edge,
+    # ~10 s cooldown), så en burst af effekt-ændringer under ladning ikke giver en
+    # beslutnings-storm. Ingen genberegning af planen — kun ny beslutning/aktuering.
+    charger_signals = [
+        entry.data.get(CONF_CHARGER_MODE_SENSOR),
+        entry.data.get(CONF_CHARGE_POWER_SENSOR),
+    ]
+    charger_signals = [e for e in charger_signals if e]
+    if charger_signals:
+
+        async def _on_charger_change(_event) -> None:
+            await coordinator.async_request_refresh()
+
+        entry.async_on_unload(
+            async_track_state_change_event(hass, charger_signals, _on_charger_change)
         )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
