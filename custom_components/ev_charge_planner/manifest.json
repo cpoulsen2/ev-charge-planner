@@ -3,11 +3,11 @@
   "name": "EV Charge Planner",
   "codeowners": ["@cpoulsen2"],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["frontend", "http"],
   "documentation": "https://github.com/cpoulsen2/ev-charge-planner",
   "integration_type": "hub",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/cpoulsen2/ev-charge-planner/issues",
   "requirements": [],
-  "version": "0.8.2"
+  "version": "0.8.3"
 }
