@@ -1,19 +1,10 @@
 # EV Charge Planner
 
 Smart EV-ladning til Home Assistant, der lader bilen på de billigste timer ud fra
-elpriser (Strømligning) og styrer en Zaptec-ladeboks. Porteret fra en Node-RED-automatisering
-til en rigtig custom integration, så den kan installeres via HACS og fejlsøges ordentligt.
+elpriser (Strømligning) og styrer en Zaptec-ladeboks.
 
 > **Status:** I brug. Planlægning, coordinator, config flow og alle entities er på plads
 > og kører i produktion. Nye funktioner tilføjes løbende.
-
-## Hvorfor en integration frem for Node-RED?
-
-- **Indbygget fejlsøgning** — `sensor.ev_charge_planner_status` viser *hvorfor* der (ikke) lades
-  lige nu, med logbog-events ved hver handling (authorize/resume/stop) og debug-logging.
-- **Ingen helper-jungle** — integrationen ejer sine egne entities i stedet for 10+ manuelle
-  `input_number`/`input_boolean`.
-- **UI-opsætning** — vælg pris-sensor, Zaptec-entities og tilføj biler i grænsefladen.
 
 ## Funktioner
 
