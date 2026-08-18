@@ -48,7 +48,8 @@
           "name": "Name (e.g. ID.3, Model Y)",
           "capacity_kwh": "Battery capacity (kWh)",
           "soc_sensor": "SoC sensor (optional — read automatically if set)",
-          "soc_live": "SoC sensor updates while charging (off for VW — anchor + calculate)"
+          "soc_live": "SoC sensor updates while charging (off for VW — anchor + calculate)",
+          "unlock_lock": "Unlock charge port when done (optional, e.g. lock.modely_charge_cable_lock)"
         }
       },
       "remove_vehicle": {

@@ -809,6 +809,23 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             "button", "press", {"entity_id": entity_id}, blocking=False
         )
 
+    def _unlock_lock_for(self, name: str) -> str | None:
+        """Lås-entitet der skal låses op når den givne bil er færdig (eller None)."""
+        for v in self._vehicles():
+            if v.name == name:
+                return v.unlock_lock
+        return None
+
+    async def _unlock(self, entity_id: str) -> None:
+        st = self.hass.states.get(entity_id)
+        if st is None or st.state == "unavailable":
+            _LOGGER.debug("Springer lås-op over — %s utilgængelig", entity_id)
+            return
+        _LOGGER.info("Låser ladeport op: %s", entity_id)
+        await self.hass.services.async_call(
+            "lock", "unlock", {"entity_id": entity_id}, blocking=False
+        )
+
     def _on_target_reached(self, target: float, car_side: bool) -> None:
         rt = self.runtime
         # Faktisk SoC nu — beregnes FØR vi nulstiller anker/baseline nedenfor
@@ -822,6 +839,11 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         rt.enabled = False
         if not rt.observer_mode:
             self.hass.async_create_task(self._press(CONF_STOP_BUTTON))
+            # Lås ladeporten op når bilen er færdig (valgfrit pr. bil, fx Tesla).
+            # Slås op FØR active_vehicle nulstilles nedenfor.
+            lock_entity = self._unlock_lock_for(rt.active_vehicle)
+            if lock_entity:
+                self.hass.async_create_task(self._unlock(lock_entity))
         self._notify(
             "🔋 Ladning færdig",
             ("Bilen stoppede selv — " if car_side else "Klar — ") + f"{actual:.0f}%",
