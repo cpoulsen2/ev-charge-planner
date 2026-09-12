@@ -50,6 +50,7 @@ from .const import (
     CONF_TOMORROW_SENSOR,
     CONF_VEHICLES,
     EVENT_ACTION,
+    NOTIFY_CLICK_PATH,
     NOTIFY_DEFAULTS,
     GUEST_VEHICLE,
     MODE_DEPARTURE,
@@ -893,7 +894,20 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             domain, name = service.split(".", 1)
             self.hass.async_create_task(
                 self.hass.services.async_call(
-                    domain, name, {"title": title, "message": message}, blocking=False
+                    domain,
+                    name,
+                    {
+                        "title": title,
+                        "message": message,
+                        # Tryk på beskeden åbner opladningssiden. iOS læser "url",
+                        # Android/Fire læser "clickAction" — derfor sættes begge.
+                        # Notify-tjenester der ikke kender nøglerne ignorerer dem.
+                        "data": {
+                            "url": NOTIFY_CLICK_PATH,
+                            "clickAction": NOTIFY_CLICK_PATH,
+                        },
+                    },
+                    blocking=False,
                 )
             )
 
