@@ -1,0 +1,52 @@
+name: Release
+
+# Opretter en GitHub Release for hvert versions-tag, så HACS viser en
+# versions-dropdown (uden releases følger HACS bare main-grenen).
+on:
+  push:
+    tags: ["v*"]
+    branches: [main]
+    # Path-filteret gælder kun branch-pushes; tag-pushes kører altid.
+    paths: [".github/workflows/release.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Release for pushet tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG findes allerede"; exit 0
+          fi
+          gh release create "$TAG" --verify-tag --title "$TAG" \
+            --notes "$(git log -1 --format=%B "$TAG")"
+
+      # Engangs-backfill af eksisterende tags. Idempotent: springer eksisterende over.
+      - name: Backfill releases for eksisterende tags
+        if: github.ref == 'refs/heads/main'
+        run: |
+          for TAG in v0.8.1 v0.8.2 v0.8.3 v0.8.4 v0.8.5 v0.8.6 v0.9.0 v0.9.1 v0.9.2 v0.9.3; do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              echo "Release $TAG findes allerede"; continue
+            fi
+            NOTES="$(git log -1 --format=%B "$TAG")"
+            case "$TAG" in
+              v0.9.0|v0.9.1|v0.9.2)
+                NOTES="⚠️ Trukket tilbage: mistænkt for at stoppe ladning i planlagte slots. Brug v0.9.3.
+
+          $NOTES" ;;
+            esac
+            gh release create "$TAG" --verify-tag --title "$TAG" --notes "$NOTES" --latest=false
+          done
+          gh release edit v0.9.3 --latest
