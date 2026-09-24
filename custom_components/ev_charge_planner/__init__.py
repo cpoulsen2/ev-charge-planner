@@ -39,6 +39,46 @@ _CARD_FILE = "www/evcp-time-picker.js"
 
 _CARD_URL = f"/{DOMAIN}/evcp-time-picker.js"
 
+# Kopi i config/www → serveres som /local, som frontend registrerer FØR
+# webserveren starter (vores egen sti findes først når integrationen er oppe).
+_LOCAL_DIR = DOMAIN
+_LOCAL_URL = f"/local/{_LOCAL_DIR}/evcp-time-picker.js"
+
+
+def _copy_card_to_www(src: str, www: str) -> None:
+    """Kopiér kortet til config/www/<domain>/ (kun hvis indholdet er ændret)."""
+    dest_dir = os.path.join(www, _LOCAL_DIR)
+    dest = os.path.join(dest_dir, os.path.basename(src))
+    with open(src, "rb") as f:
+        data = f.read()
+    try:
+        with open(dest, "rb") as f:
+            if f.read() == data:
+                return
+    except FileNotFoundError:
+        pass
+    os.makedirs(dest_dir, exist_ok=True)
+    with open(dest, "wb") as f:
+        f.write(data)
+
+
+async def _async_register_lovelace_resource(hass: "HomeAssistant", url: str) -> None:
+    """Opret/opdatér kortet som dashboard-ressource (kun storage-mode)."""
+    data = hass.data.get("lovelace")
+    resources = getattr(data, "resources", None)
+    if resources is None and isinstance(data, dict):
+        resources = data.get("resources")
+    if resources is None or not hasattr(resources, "async_create_item"):
+        return  # YAML-mode: ressourcer kan ikke ændres herfra
+    await resources.async_get_info()  # sikrer at samlingen er indlæst fra storage
+    base = url.split("?", 1)[0]
+    for item in resources.async_items():
+        if str(item.get("url", "")).split("?", 1)[0] == base:
+            if item.get("url") != url:
+                await resources.async_update_item(item["id"], {"url": url})
+            return
+    await resources.async_create_item({"res_type": "module", "url": url})
+
 
 async def _async_register_frontend(hass: "HomeAssistant") -> None:
     """Registrér og auto-indlæs det medfølgende tidsvælger-kort.
@@ -72,6 +112,22 @@ async def _async_register_frontend(hass: "HomeAssistant") -> None:
         [StaticPathConfig(_CARD_URL, path, False)]
     )
     add_extra_js_url(hass, f"{_CARD_URL}?v={version}" if version else _CARD_URL)
+
+    # Ekstra, opstarts-sikker indlæsning: sider hentet mens HA starter mangler
+    # extra_js_url ovenfor → "Custom element doesn't exist". En dashboard-ressource
+    # under /local kan hentes allerede dér. Kortet definerer sig kun én gang.
+    try:
+        await hass.async_add_executor_job(
+            _copy_card_to_www, path, hass.config.path("www")
+        )
+        await _async_register_lovelace_resource(
+            hass, f"{_LOCAL_URL}?v={version}" if version else _LOCAL_URL
+        )
+    except Exception:  # noqa: BLE001 — må aldrig vælte opsætningen
+        _LOGGER.warning(
+            "Kunne ikke registrere tidsvælger-kortet som dashboard-ressource",
+            exc_info=True,
+        )
 
 
 async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool:
