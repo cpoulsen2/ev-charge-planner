@@ -13,7 +13,7 @@ from .const import (
     DEFAULT_POWER_KW,
     DEFAULT_TARGET_SOC,
     DOMAIN,
-    MODE_DEPARTURE,
+    MODE_STANDARD,
 )
 
 STORAGE_VERSION = 1
@@ -29,9 +29,6 @@ class Vehicle:
     # True: sensoren opdaterer under ladning (fx Tesla) → brug direkte.
     # False: sensoren opdaterer kun ved kørsel (fx VW) → brug som anker + beregn.
     soc_live: bool = True
-    # Valgfri lås-entitet (fx lock.modely_charge_cable_lock) der låses op når
-    # målet er nået / ladningen er færdig. Tom = gør intet.
-    unlock_lock: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -43,7 +40,6 @@ class Vehicle:
             capacity_kwh=float(data["capacity_kwh"]),
             soc_sensor=data.get("soc_sensor") or None,
             soc_live=data.get("soc_live", True),
-            unlock_lock=data.get("unlock_lock") or None,
         )
 
 
@@ -56,7 +52,7 @@ class Runtime:
 
     # --- Brugerkontroller ---
     active_vehicle: str = CHOOSE_VEHICLE
-    mode: str = MODE_DEPARTURE  # Afgang er standard (Standard-mode bruges ikke i UI'et)
+    mode: str = MODE_STANDARD
     current_soc: float = 0.0
     target_soc: float = DEFAULT_TARGET_SOC
     guest_capacity: float = DEFAULT_GUEST_CAPACITY_KWH

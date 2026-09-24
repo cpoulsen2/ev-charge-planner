@@ -67,11 +67,6 @@ NOTIFY_DEFAULTS = {
     "notify_not_enough_time": True,
 }
 
-# Sti som notifikationerne åbner ved tryk på selve beskeden.
-# Relativ med vilje: så følger den den forbindelse appen er på
-# (wifi hjemme / ekstern adgang ude) i stedet for en hårdkodet vært.
-NOTIFY_CLICK_PATH = "/lovelace/electricity"
-
 # --- Zaptec charger_mode værdier ---
 CM_DISCONNECTED = "disconnected"
 CM_REQUESTING = "connected_requesting"

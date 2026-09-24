@@ -34,7 +34,6 @@ from .const import (
 _SENSOR = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
 _BINARY = selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor"))
 _BUTTON = selector.EntitySelector(selector.EntitySelectorConfig(domain="button"))
-_LOCK = selector.EntitySelector(selector.EntitySelectorConfig(domain="lock"))
 _TEXT = selector.TextSelector()
 
 
@@ -130,18 +129,13 @@ class EvcpOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
-            # Upsert: samme navn → opdatér den eksisterende (så man kan tilføje
-            # fx en lås til en bil der allerede er oprettet, uden at fjerne den først).
-            vehicles = [
-                v for v in self._vehicles() if v.get("name") != user_input["name"]
-            ]
+            vehicles = self._vehicles()
             vehicles.append(
                 {
                     "name": user_input["name"],
                     "capacity_kwh": float(user_input["capacity_kwh"]),
                     "soc_sensor": user_input.get("soc_sensor") or None,
                     "soc_live": user_input.get("soc_live", True),
-                    "unlock_lock": user_input.get("unlock_lock") or None,
                 }
             )
             return self._save({CONF_VEHICLES: vehicles})
@@ -155,7 +149,6 @@ class EvcpOptionsFlow(OptionsFlow):
                 ),
                 vol.Optional("soc_sensor"): _SENSOR,
                 vol.Optional("soc_live", default=True): selector.BooleanSelector(),
-                vol.Optional("unlock_lock"): _LOCK,
             }
         )
         return self.async_show_form(step_id="add_vehicle", data_schema=schema)

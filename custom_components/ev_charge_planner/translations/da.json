@@ -48,8 +48,7 @@
           "name": "Navn (fx ID.3, Model Y)",
           "capacity_kwh": "Batterikapacitet (kWh)",
           "soc_sensor": "SoC-sensor (valgfri — aflæses automatisk hvis sat)",
-          "soc_live": "SoC-sensoren opdaterer under ladning (fra for VW — anker + beregn)",
-          "unlock_lock": "Lås ladeport op når færdig (valgfri, fx lock.modely_charge_cable_lock)"
+          "soc_live": "SoC-sensoren opdaterer under ladning (fra for VW — anker + beregn)"
         }
       },
       "remove_vehicle": {
