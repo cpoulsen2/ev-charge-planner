@@ -24,6 +24,7 @@
         "title": "EV Charge Planner",
         "menu_options": {
           "add_vehicle": "Add vehicle",
+          "edit_vehicle": "Edit vehicle",
           "remove_vehicle": "Remove vehicle",
           "notifications": "Notifications",
           "settings": "Settings"
@@ -51,6 +52,19 @@
           "soc_live": "SoC sensor updates while charging (off for VW — anchor + calculate)"
         }
       },
+      "edit_vehicle": {
+        "title": "Edit vehicle",
+        "data": { "name": "Vehicle" }
+      },
+      "edit_vehicle_details": {
+        "title": "Edit {name}",
+        "description": "The name cannot be changed here — remove and re-add the vehicle to rename it.",
+        "data": {
+          "capacity_kwh": "Battery capacity (kWh)",
+          "soc_sensor": "SoC sensor (optional — read automatically if set)",
+          "soc_live": "SoC sensor updates while charging (off for VW — anchor + calculate)"
+        }
+      },
       "remove_vehicle": {
         "title": "Remove vehicle",
         "data": { "name": "Vehicle" }
@@ -61,7 +75,7 @@
       }
     },
     "abort": {
-      "no_vehicles": "There are no vehicles to remove."
+      "no_vehicles": "There are no vehicles yet."
     }
   },
   "entity": {

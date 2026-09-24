@@ -24,6 +24,7 @@
         "title": "EV Charge Planner",
         "menu_options": {
           "add_vehicle": "Tilføj bil",
+          "edit_vehicle": "Rediger bil",
           "remove_vehicle": "Fjern bil",
           "notifications": "Notifikationer",
           "settings": "Indstillinger"
@@ -51,6 +52,19 @@
           "soc_live": "SoC-sensoren opdaterer under ladning (fra for VW — anker + beregn)"
         }
       },
+      "edit_vehicle": {
+        "title": "Rediger bil",
+        "data": { "name": "Bil" }
+      },
+      "edit_vehicle_details": {
+        "title": "Rediger {name}",
+        "description": "Navnet kan ikke ændres her — fjern og tilføj bilen igen for at omdøbe den.",
+        "data": {
+          "capacity_kwh": "Batterikapacitet (kWh)",
+          "soc_sensor": "SoC-sensor (valgfri — aflæses automatisk hvis sat)",
+          "soc_live": "SoC-sensoren opdaterer under ladning (fra for VW — anker + beregn)"
+        }
+      },
       "remove_vehicle": {
         "title": "Fjern bil",
         "data": { "name": "Bil" }
@@ -61,7 +75,7 @@
       }
     },
     "abort": {
-      "no_vehicles": "Der er ingen biler at fjerne."
+      "no_vehicles": "Der er ingen biler endnu."
     }
   },
   "entity": {

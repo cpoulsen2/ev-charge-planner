@@ -78,6 +78,7 @@ class EvcpOptionsFlow(OptionsFlow):
 
     def __init__(self, entry: ConfigEntry) -> None:
         self._entry = entry
+        self._edit_name: str | None = None
 
     def _vehicles(self) -> list[dict]:
         return list(self._entry.options.get(CONF_VEHICLES, []))
@@ -87,7 +88,13 @@ class EvcpOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init",
-            menu_options=["add_vehicle", "remove_vehicle", "notifications", "settings"],
+            menu_options=[
+                "add_vehicle",
+                "edit_vehicle",
+                "remove_vehicle",
+                "notifications",
+                "settings",
+            ],
         )
 
     async def async_step_notifications(
@@ -152,6 +159,68 @@ class EvcpOptionsFlow(OptionsFlow):
             }
         )
         return self.async_show_form(step_id="add_vehicle", data_schema=schema)
+
+    async def async_step_edit_vehicle(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        names = [v["name"] for v in self._vehicles()]
+        if not names:
+            return self.async_abort(reason="no_vehicles")
+        if user_input is not None:
+            self._edit_name = user_input["name"]
+            return await self.async_step_edit_vehicle_details()
+        schema = vol.Schema(
+            {
+                vol.Required("name"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=names)
+                )
+            }
+        )
+        return self.async_show_form(step_id="edit_vehicle", data_schema=schema)
+
+    async def async_step_edit_vehicle_details(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        vehicles = self._vehicles()
+        idx = next(
+            (i for i, v in enumerate(vehicles) if v["name"] == self._edit_name), None
+        )
+        if idx is None:
+            return self.async_abort(reason="no_vehicles")
+        current = vehicles[idx]
+        if user_input is not None:
+            # Behold ukendte nøgler (fx felter fra nyere versioner) og pladsen i listen.
+            vehicles[idx] = {
+                **current,
+                "capacity_kwh": float(user_input["capacity_kwh"]),
+                "soc_sensor": user_input.get("soc_sensor") or None,
+                "soc_live": user_input.get("soc_live", True),
+            }
+            return self._save({CONF_VEHICLES: vehicles})
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    "capacity_kwh", default=current.get("capacity_kwh", 77)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=10, max=150, step=1, unit_of_measurement="kWh"
+                    )
+                ),
+                # suggested_value (ikke default), så feltet kan ryddes igen.
+                vol.Optional(
+                    "soc_sensor",
+                    description={"suggested_value": current.get("soc_sensor")},
+                ): _SENSOR,
+                vol.Optional(
+                    "soc_live", default=current.get("soc_live", True)
+                ): selector.BooleanSelector(),
+            }
+        )
+        return self.async_show_form(
+            step_id="edit_vehicle_details",
+            data_schema=schema,
+            description_placeholders={"name": current["name"]},
+        )
 
     async def async_step_remove_vehicle(
         self, user_input: dict[str, Any] | None = None
