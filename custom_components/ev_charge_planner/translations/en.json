@@ -11,6 +11,7 @@
           "charge_power_sensor": "Charge power sensor",
           "session_energy_sensor": "Session energy sensor (kWh)",
           "authorize_button": "Authorize button",
+          "deauthorize_button": "Deauthorize button (optional — found automatically)",
           "resume_button": "Resume button",
           "stop_button": "Stop button",
           "notify_service": "Notify service (optional, e.g. notify.mobile_app_iphone_cp)"

@@ -40,6 +40,13 @@ CAR_SIDE_STOP_TICKS = 4  # antal minutter med 0 W efter ladning før "bilen stop
 # --- Authorize-styring (Zaptec låser på dubletter — se guards.py) ---
 AUTHORIZE_MIN_INTERVAL = timedelta(minutes=3)  # hård backstop mellem to authorize-tryk
 START_FAILED_TIMEOUT = timedelta(minutes=5)  # giv op + notificér efter dette uden strøm i slot
+SLOT_START_DELAY = timedelta(seconds=45)  # første authorize i et slot: ikke præcis på kvarteret
+AUTHORIZE_CONFIRM_TIMEOUT = timedelta(seconds=45)  # ingen strøm så længe efter kaldet → redning
+DEAUTHORIZE_SETTLE = timedelta(seconds=10)  # stabil requesting efter deauthorize før authorize
+DEAUTHORIZE_MAX_WAIT = timedelta(seconds=90)  # kommer laderen ikke tilbage i requesting → opgiv
+DEAUTHORIZE_GRACE_PERIOD = timedelta(minutes=2)  # eget deauthorize ≠ kabel ud / bilskifte
+RESCUE_MAX_ROUNDS = 2  # deauthorize → authorize-runder før giv-op
+SLOW_PRESS_WARNING = timedelta(seconds=10)  # Zaptec-kald længere end dette er sandsynligvis gentaget
 
 # --- Config entry: data (fast opsætning) ---
 CONF_PRICE_SENSOR = "price_sensor"
@@ -48,6 +55,7 @@ CONF_CHARGER_MODE_SENSOR = "charger_mode_sensor"
 CONF_CHARGE_POWER_SENSOR = "charge_power_sensor"
 CONF_SESSION_ENERGY_SENSOR = "session_energy_sensor"
 CONF_AUTHORIZE_BUTTON = "authorize_button"
+CONF_DEAUTHORIZE_BUTTON = "deauthorize_button"  # valgfri; ellers udledt af authorize-knappen
 CONF_RESUME_BUTTON = "resume_button"
 CONF_STOP_BUTTON = "stop_button"
 CONF_NOTIFY_SERVICE = "notify_service"

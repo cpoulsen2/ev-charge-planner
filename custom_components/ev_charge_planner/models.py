@@ -86,6 +86,13 @@ class Runtime:
     start_commanded_iso: str = ""  # sidste kommanderede start (flap-undertrykkelse)
     start_wait_since_iso: str = ""  # udfaldsdrevet giv-op-timer: hvornår vi begyndte at vente
     start_failed_notified: bool = False  # giv-op-notifikation sendt (én gang)
+    authorize_sent_iso: str = ""  # hvornår seneste authorize-kald til Zaptec blev FÆRDIGT
+    # Redning (deauthorize → vent → ét authorize) når et authorize ikke gav strøm
+    rescue_round: int = 0  # brugte runder i denne kabel-session
+    rescue_phase: str = ""  # "" | "deauthorized"
+    rescue_deauth_iso: str = ""  # hvornår vi trykkede deauthorize (grace-periode)
+    rescue_deauth_done_iso: str = ""  # hvornår deauthorize-kaldet var færdigt
+    ignored_disconnect: bool = False  # "frakoblet" set under grace — tjekkes bagefter
 
     def to_dict(self) -> dict:
         return asdict(self)

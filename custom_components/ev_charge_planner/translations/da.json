@@ -11,6 +11,7 @@
           "charge_power_sensor": "Ladeeffekt-sensor",
           "session_energy_sensor": "Session-energi sensor (kWh)",
           "authorize_button": "Authorize-knap",
+          "deauthorize_button": "Deauthorize-knap (valgfri — findes automatisk)",
           "resume_button": "Resume-knap",
           "stop_button": "Stop-knap",
           "notify_service": "Notify-service (valgfri, fx notify.mobile_app_iphone_cp)"
