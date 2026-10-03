@@ -127,6 +127,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         self._wake_unsub = None
         self._wake_at: datetime | None = None
         self._closed = False
+        self._price_count = 0
 
     # ---------- persistens ----------
 
@@ -279,21 +280,29 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         (fx sensor.stromligning_adjusted_price_vat →
          binary_sensor.stromligning_adjusted_price_vat_tomorrow).
         """
-        configured = self._cfg(CONF_TOMORROW_SENSOR)
+        configured = self._opt(CONF_TOMORROW_SENSOR)
         if configured:
             return configured
-        price = self._cfg(CONF_PRICE_SENSOR) or ""
+        price = self.price_sensor() or ""
         if price.startswith("sensor."):
             obj = price.split(".", 1)[1]
             return f"binary_sensor.{obj}_tomorrow"
         return None
 
+    def price_sensor(self) -> str | None:
+        return self._opt(CONF_PRICE_SENSOR) or None
+
     def _prices(self) -> tuple[list[dict], list[dict]]:
-        st = self.hass.states.get(self._cfg(CONF_PRICE_SENSOR) or "")
+        self._price_count = 0
+        st = self.hass.states.get(self.price_sensor() or "")
         if not st:
             return [], []
         attrs = st.attributes
-        raw_today = attrs.get("prices_today") or attrs.get("raw_today") or []
+        # Strømligning har flere formater: "adjusted"-sensorerne har prices_today /
+        # prices_tomorrow, "current price"-sensoren har én samlet liste i "prices".
+        raw_today = (
+            attrs.get("prices_today") or attrs.get("raw_today") or attrs.get("prices") or []
+        )
         raw_tomorrow = attrs.get("prices_tomorrow") or attrs.get("raw_tomorrow") or []
 
         # Fald tilbage til den separate "tomorrow"-sensor hvis hovedsensoren ikke
@@ -308,6 +317,12 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
                         or tmr.attributes.get("raw_tomorrow")
                         or []
                     )
+        # Samme kvarter må ikke tælle to gange (fx hvis "prices" allerede har i morgen)
+        seen = {planner.to_ms(e["start"]) for e in raw_today if "start" in e}
+        raw_tomorrow = [
+            e for e in raw_tomorrow if "start" in e and planner.to_ms(e["start"]) not in seen
+        ]
+        self._price_count = len(raw_today) + len(raw_tomorrow)
         return list(raw_today), list(raw_tomorrow)
 
     # ---------- deadline / live SoC ----------
@@ -733,6 +748,11 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
                 reason = "Allerede ved mål"
             elif plan and plan.warning == planner.WARN_NO_PRICES:
                 reason = "Ingen prisdata i tidsvinduet"
+                if not self._price_count:
+                    reason = (
+                        f"Ingen priser fra {self.price_sensor()} — vælg en anden "
+                        "pris-sensor under Konfigurér → Indstillinger"
+                    )
             return dec(ACT_WAITING, reason, live_soc=live_soc)
 
         nxt = next((b for b in plan.plan if b.start_ms > now_ms), None)
@@ -769,6 +789,14 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             return
         if decision.observer:
             decision.current_note = f"Observatør: ville sætte {desired:.0f} A"
+            return
+        st = self.hass.states.get(entity)
+        if st is None or st.state == "unavailable":
+            # Kald til en utilgængelig entitet springes over af HA — sig det tydeligt
+            decision.current_note = (
+                f"Strøm-entiteten {entity} er utilgængelig — vælg en anden under "
+                "Konfigurér → Indstillinger (fx number.zag089363_charger_max_current)"
+            )
             return
 
         now = dt_util.utcnow()

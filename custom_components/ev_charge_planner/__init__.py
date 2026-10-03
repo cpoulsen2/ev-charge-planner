@@ -23,7 +23,6 @@ from .const import (
     CONF_CHARGE_POWER_SENSOR,
     CONF_CHARGER_MODE_SENSOR,
     CONF_CURRENT_ENTITY,
-    CONF_PRICE_SENSOR,
     DEFAULT_CHARGE_CURRENT,
     DOMAIN,
     PLATFORMS,
@@ -156,14 +155,16 @@ async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     # Genberegn plan når prisdata opdateres
-    price_sensor = entry.data.get(CONF_PRICE_SENSOR)
-    if price_sensor:
+    price_sensors = [
+        e for e in (coordinator.price_sensor(), coordinator._tomorrow_sensor_id()) if e
+    ]
+    if price_sensors:
 
         async def _on_price_change(_event) -> None:
             await coordinator.async_user_changed(urgent=False)
 
         entry.async_on_unload(
-            async_track_state_change_event(hass, [price_sensor], _on_price_change)
+            async_track_state_change_event(hass, price_sensors, _on_price_change)
         )
 
     # Reagér straks når laderen skifter mode/effekt, eller når strøm-entiteten melder

@@ -381,3 +381,89 @@ async def test_disable_restores_16a_but_reload_does_not(sim, hass):
     await integration.async_unload_entry(hass, entry)
     await hass.async_block_till_done()
     assert zap.current == 16, "slået fra → laderen virker normalt igen"
+
+
+# ---------- opsætning: priser, strøm-entitet, standard-tilstand ----------
+
+
+def _quarters(start: datetime, n: int, price: float) -> list[dict]:
+    return [
+        {
+            "start": (start + timedelta(minutes=15 * i)).isoformat(),
+            "end": (start + timedelta(minutes=15 * (i + 1))).isoformat(),
+            "price": price,
+        }
+        for i in range(n)
+    ]
+
+
+async def test_current_price_sensor_format_without_duplicates(sim, hass):
+    """sensor.stromligning_current_price_vat har kun attributten "prices"."""
+    c, zap, clock, tick, *_ = sim
+    clock.t = S(-3600)
+    hass.states.async_set("sensor.price", "1.0", {"prices": _quarters(S(-3600), 96, 1.0)})
+    # samme kvarterer også på morgendags-sensoren → må ikke tælle dobbelt
+    hass.states.async_set(
+        "binary_sensor.price_tomorrow", "on", {"prices_tomorrow": _quarters(S(0), 8, 1.0)}
+    )
+    today, tomorrow = c._prices()
+    assert len(today) == 96 and tomorrow == []
+    c.runtime.departure_iso = (S(4 * 3600)).isoformat()
+    c.recalculate()
+    assert c.plan_result is not None and c.plan_result.plan
+    starts = [b.start_ms for b in c.plan_result.plan]
+    assert len(starts) == len(set(starts))
+
+
+async def test_missing_prices_gives_clear_reason(sim, hass):
+    c, zap, clock, tick, *_ = sim
+    clock.t = S(-3600)
+    zap.car_draws = False  # laderen lader ikke lige nu
+    zap.publish()
+    hass.states.async_set("sensor.price", "1.0", {})
+    c.runtime.departure_iso = (S(4 * 3600)).isoformat()
+    c.recalculate()
+    d = await tick(S(-3600))
+    assert "Ingen priser fra sensor.price" in d.reason
+
+
+async def test_unavailable_current_entity_is_explained_and_not_written(sim, hass):
+    c, zap, _, tick, *_ = sim
+    hass.states.async_set(CUR, "unavailable")
+    d = await tick(S(-1000))
+    assert zap.writes == []
+    assert "utilgængelig" in d.current_note
+
+
+async def test_new_runtime_defaults_to_departure_mode():
+    from custom_components.ev_charge_planner.const import MODE_DEPARTURE
+    from custom_components.ev_charge_planner.models import Runtime
+
+    assert Runtime().mode == MODE_DEPARTURE
+
+
+async def test_settings_step_can_change_price_and_current_entity(hass):
+    from custom_components.ev_charge_planner.config_flow import EvcpOptionsFlow
+
+    entry = _entry()
+    entry.add_to_hass(hass)
+    flow = EvcpOptionsFlow(entry)
+    flow.hass = hass
+    form = await flow.async_step_settings()
+    assert form["step_id"] == "settings"
+    fields = [str(k) for k in form["data_schema"].schema]
+    assert {"price_sensor", "tomorrow_sensor", "current_entity", "charge_current"} <= set(fields)
+    result = await flow.async_step_settings(
+        {
+            "price_sensor": "sensor.stromligning_adjusted_price_vat",
+            "current_entity": "number.zag089363_charger_max_current",
+            "charge_current": 16,
+            "min_block_minutes": 0,
+        }
+    )
+    assert result["type"] == "create_entry"
+    data = result["data"]
+    assert data["price_sensor"] == "sensor.stromligning_adjusted_price_vat"
+    assert data["current_entity"] == "number.zag089363_charger_max_current"
+    assert data["tomorrow_sensor"] is None
+    assert data["vehicles"], "bilerne bevares"

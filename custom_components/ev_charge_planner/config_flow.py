@@ -249,6 +249,8 @@ class EvcpOptionsFlow(OptionsFlow):
         if user_input is not None:
             return self._save(
                 {
+                    CONF_PRICE_SENSOR: user_input[CONF_PRICE_SENSOR],
+                    CONF_TOMORROW_SENSOR: user_input.get(CONF_TOMORROW_SENSOR) or None,
                     CONF_CURRENT_ENTITY: user_input[CONF_CURRENT_ENTITY],
                     CONF_CHARGE_CURRENT: int(user_input[CONF_CHARGE_CURRENT]),
                     CONF_MIN_BLOCK_MINUTES: int(user_input[CONF_MIN_BLOCK_MINUTES]),
@@ -257,9 +259,21 @@ class EvcpOptionsFlow(OptionsFlow):
         opts, data = self._entry.options, self._entry.data
         current = opts.get(CONF_MIN_BLOCK_MINUTES, 0)
         entity = opts.get(CONF_CURRENT_ENTITY) or data.get(CONF_CURRENT_ENTITY)
+        price = opts.get(CONF_PRICE_SENSOR) or data.get(CONF_PRICE_SENSOR)
+        tomorrow = (
+            opts[CONF_TOMORROW_SENSOR]
+            if CONF_TOMORROW_SENSOR in opts
+            else data.get(CONF_TOMORROW_SENSOR)
+        )
         amps = opts.get(CONF_CHARGE_CURRENT, data.get(CONF_CHARGE_CURRENT, DEFAULT_CHARGE_CURRENT))
         schema = vol.Schema(
             {
+                vol.Required(
+                    CONF_PRICE_SENSOR, description={"suggested_value": price}
+                ): _SENSOR,
+                vol.Optional(
+                    CONF_TOMORROW_SENSOR, description={"suggested_value": tomorrow}
+                ): _BINARY,
                 vol.Required(
                     CONF_CURRENT_ENTITY, description={"suggested_value": entity}
                 ): _NUMBER,
