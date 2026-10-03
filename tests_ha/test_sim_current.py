@@ -595,3 +595,25 @@ async def test_missing_tomorrow_prices_are_explained(sim, hass):
 
 def planner_ms(dt: datetime) -> int:
     return int(dt.timestamp() * 1000)
+
+
+async def test_tomorrow_sensor_with_prices_attribute(sim, hass):
+    """binary_sensor.stromligning_tomorrow_spotprice_vat har priserne under "prices"."""
+    c, zap, clock, tick, make, entry = sim
+    now = S(-3600)
+    clock.t = now
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, "tomorrow_sensor": "binary_sensor.spot_tomorrow"}
+    )
+    hass.states.async_set("sensor.price", "2.4", {"prices": _quarters(now, 96, 2.4)})
+    tomorrow = _quarters(now + timedelta(hours=24), 96, 2.0)
+    for q in tomorrow[40:64]:
+        q["price"] = 0.6
+    hass.states.async_set("binary_sensor.spot_tomorrow", "on", {"prices": tomorrow})
+    today, tmr = c._prices()
+    assert len(tmr) == 96
+    c.runtime.departure_iso = (now + timedelta(hours=40)).isoformat()
+    c.recalculate()
+    cheap_start = planner_ms(now + timedelta(hours=34))
+    assert c.plan_result.plan
+    assert all(b.start_ms >= cheap_start for b in c.plan_result.plan)

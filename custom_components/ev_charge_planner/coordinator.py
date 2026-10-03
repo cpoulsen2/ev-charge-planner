@@ -309,9 +309,11 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             for tmr_id in self.tomorrow_sensor_candidates():
                 tmr = self.hass.states.get(tmr_id)
                 if tmr and tmr.state == "on":
+                    # adjusted-sensoren: prices_tomorrow; spotpris-sensoren: prices
                     raw_tomorrow = (
                         tmr.attributes.get("prices_tomorrow")
                         or tmr.attributes.get("raw_tomorrow")
+                        or tmr.attributes.get("prices")
                         or []
                     )
                 if raw_tomorrow:
