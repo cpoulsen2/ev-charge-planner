@@ -44,6 +44,7 @@ CURRENT_RETRY_DELAYS = (  # derefter: genforsøg med stigende pause
 )
 CURRENT_MIN_CHANGE_INTERVAL = timedelta(minutes=15)  # Zaptec: højst én ændring pr. 15 min
 USER_ACTION_URGENCY = timedelta(minutes=2)  # brugerhandling må ændre strømmen med det samme
+SESSION_SETTLE = timedelta(seconds=20)  # efter isætning: send strømmen igen
 START_FAILED_TIMEOUT = timedelta(minutes=5)  # notificér hvis der ikke lades så længe i et slot
 SLOW_CALL_WARNING = timedelta(seconds=10)  # Zaptec-kald længere end dette logges som advarsel
 

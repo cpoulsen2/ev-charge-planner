@@ -27,6 +27,11 @@ elpriser (Strømligning) og styrer en Zaptec-ladeboks.
   Kaldet til Zaptec gentages med stigende pauser, til laderen melder den ønskede værdi,
   og der er aldrig to kald i gang samtidig. Planlagte ændringer følger Zaptecs anbefaling
   om højst én ændring pr. 15 min; brugerhandlinger (Stop, Lad straks) sker med det samme.
+- **Følger Zaptecs anbefalinger for MaxCurrent** — strømmen sendes kun, når der er en
+  session (bil sat i), og sendes igen ~20 s efter isætning, fordi laderen læser værdien
+  ved sessionsstart. En værdi regnes først som sat, når både indstillingen og
+  ChargeCurrentSet (`sensor.<lader>_allocated_charge_current`) passer, og der ikke lader
+  strøm ved 0 A. Er laderen offline, står det i status.
 - **Slås integrationen fra eller slettes**, sættes strømmen tilbage til ladestrømmen, så
   laderen virker som en almindelig lader igen.
 - **Robust over for genstart** — planen og strømstyringens tilstand gemmes, så Home

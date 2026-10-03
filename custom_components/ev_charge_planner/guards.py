@@ -14,19 +14,51 @@ melder den ønskede værdi tilbage.
 from __future__ import annotations
 
 
-def charger_max_current_entity(charger_mode_sensor: str | None) -> str | None:
-    """Laderens egen max-strøm-entitet, udledt af charger mode-sensoren.
+def charger_entity(charger_mode_sensor: str | None, domain: str, suffix: str) -> str | None:
+    """En Zaptec-entitet for samme lader, udledt af charger mode-sensoren.
 
-    ``sensor.zag089363_charger_mode`` → ``number.zag089363_charger_max_current``
-    (Zaptec-integrationens navngivning). None hvis navnet ikke følger mønstret.
+    ``sensor.zag089363_charger_mode`` + (``number``, ``charger_max_current``) →
+    ``number.zag089363_charger_max_current`` (Zaptec-integrationens navngivning).
+    None hvis navnet ikke følger mønstret.
     """
-    prefix, suffix = "sensor.", "_charger_mode"
+    prefix, mode_suffix = "sensor.", "_charger_mode"
     if not charger_mode_sensor:
         return None
-    if not (charger_mode_sensor.startswith(prefix) and charger_mode_sensor.endswith(suffix)):
+    if not (charger_mode_sensor.startswith(prefix) and charger_mode_sensor.endswith(mode_suffix)):
         return None
-    charger = charger_mode_sensor[len(prefix) : -len(suffix)]
-    return f"number.{charger}_charger_max_current" if charger else None
+    charger = charger_mode_sensor[len(prefix) : -len(mode_suffix)]
+    return f"{domain}.{charger}_{suffix}" if charger else None
+
+
+def charger_max_current_entity(charger_mode_sensor: str | None) -> str | None:
+    """Laderens egen max-strøm: number.<lader>_charger_max_current."""
+    return charger_entity(charger_mode_sensor, "number", "charger_max_current")
+
+
+MIN_CHARGE_AMPS = 6.0  # Zaptec: under 6 A pauser laderen, fra 6 A lader den
+
+
+def current_applied(
+    *,
+    desired: float,
+    setting: float | None,
+    charge_current_set: float | None,
+    power_flowing: bool,
+) -> tuple[bool, str]:
+    """Har laderen faktisk ANVENDT den ønskede strøm (ikke kun gemt den)?
+
+    Zaptec: sammenlign med både MaxCurrent (indstillingen) og ChargeCurrentSet
+    (det laderen bruger). En ændring kan accepteres i skyen uden at nå laderen.
+    Returnerer ``(anvendt, forklaring)``.
+    """
+    if setting is None or abs(setting - desired) >= 0.5:
+        return (False, "")
+    want_charge = desired >= MIN_CHARGE_AMPS
+    if charge_current_set is not None and (charge_current_set >= MIN_CHARGE_AMPS) != want_charge:
+        return (False, f"laderen bruger {charge_current_set:.0f} A")
+    if not want_charge and power_flowing:
+        return (False, "der lader stadig")
+    return (True, "")
 
 
 CURRENT_IN_SYNC = "in_sync"

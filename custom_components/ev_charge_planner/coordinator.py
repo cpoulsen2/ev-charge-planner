@@ -57,6 +57,7 @@ from .const import (
     NOTIFY_CLICK_PATH,
     NOTIFY_DEFAULTS,
     GUEST_VEHICLE,
+    SESSION_SETTLE,
     SLOW_CALL_WARNING,
     START_FAILED_TIMEOUT,
     UPDATE_INTERVAL,
@@ -85,6 +86,7 @@ class Decision:
     desired_current: float = 0.0  # A planneren vil have på laderen
     actual_current: float | None = None  # A laderen melder (None = ukendt)
     current_note: str = ""  # fx "Sætter 16 A — Zaptec svarer ikke, prøver igen 03:07"
+    charge_current_set: float | None = None  # A laderen faktisk bruger (ChargeCurrentSet)
     timestamp: datetime = field(default_factory=dt_util.utcnow)
 
 
@@ -119,6 +121,8 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         # Et strøm-kald der stadig kører — Zaptec-integrationen kan selv gentage et
         # kald i op til ~100 s, så der sendes aldrig et nyt mens det kører.
         self._write_inflight = False
+        # Ny session: send den ønskede strøm igen efter dette tidspunkt (Zaptec)
+        self._session_send_at: datetime | None = None
         # Brugerhandling (Stop, Lad straks, automatik til, bilvalg …) må ændre
         # strømmen med det samme — uden Zaptecs 15-minutters-anbefaling.
         self._urgent_until: datetime | None = None
@@ -834,6 +838,16 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             )
             return
 
+        # Zaptec: "Do not send MaxCurrent adjustments before the session exists; the
+        # charger evaluates MaxCurrent at the time the SessionIdentifier is reported."
+        # Uden bil sendes intet; når en ny session starter, sendes værdien igen.
+        if decision.charger_mode in (CM_DISCONNECTED, "unknown", "unavailable"):
+            have = "ukendt" if actual is None else f"{actual:.0f} A"
+            decision.current_note = (
+                f"Ingen bil tilsluttet — strømmen sættes, når bilen er sat i (nu {have})"
+            )
+            return
+
         now = dt_util.utcnow()
         if rt.cur_target != desired:
             # Ny ønsket værdi → nyt forløb
@@ -844,38 +858,72 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             rt.cur_last_error = ""
             await self.async_save()
 
-        in_sync = actual is not None and abs(actual - desired) < 0.5
-        if in_sync:
+        session_resend = False
+        if self._session_send_at is not None:
+            if now < self._session_send_at:
+                self._wake_in((self._session_send_at - now).total_seconds() + 1)
+                decision.current_note = (
+                    f"Ny session — sender {desired:.0f} A, når sessionen er registreret"
+                )
+                return
+            session_resend = True
+
+        # Zaptec: sammenlign med både MaxCurrent og ChargeCurrentSet — en ændring kan
+        # accepteres i skyen uden at nå laderen (fx når den er offline).
+        charge_current_set = self._get_float(
+            self._charger_entity("sensor", "allocated_charge_current")
+        )
+        decision.charge_current_set = charge_current_set
+        applied, why = guards.current_applied(
+            desired=desired,
+            setting=actual,
+            charge_current_set=charge_current_set,
+            power_flowing=decision.charge_power > CHARGE_POWER_THRESHOLD_KW,
+        )
+        if session_resend:
+            applied, why = False, "ny session"
+
+        if applied:
             if not rt.cur_confirmed:
                 rt.cur_confirmed = True
                 rt.cur_last_error = ""
-                _LOGGER.info("Laderen melder %.0f A (ønsket)", desired)
+                _LOGGER.info("Laderen bruger %.0f A (ønsket)", desired)
                 await self.async_save()
             decision.current_note = f"{desired:.0f} A"
             return
 
-        if rt.cur_confirmed and not self._write_inflight:
-            # Laderen HAVDE den rigtige værdi, men melder nu noget andet
-            _LOGGER.warning(
-                "Strømmen blev ændret udefra (%s A, ønsket %.0f A) — sætter den igen",
-                actual,
-                desired,
-            )
+        setting_ok = actual is not None and abs(actual - desired) < 0.5
+        if rt.cur_confirmed and not self._write_inflight and not session_resend:
+            if setting_ok:
+                _LOGGER.warning(
+                    "Laderen har ikke anvendt %.0f A (%s) — sender igen", desired, why
+                )
+                rt.cur_last_error = f"ikke anvendt: {why}"
+            else:
+                _LOGGER.warning(
+                    "Strømmen blev ændret udefra (%s A, ønsket %.0f A) — sætter den igen",
+                    actual,
+                    desired,
+                )
+                rt.cur_last_error = f"ændret udefra til {actual} A"
             rt.cur_confirmed = False
-            rt.cur_last_error = f"ændret udefra til {actual} A"
             await self.async_save()
+        elif setting_ok and why and not session_resend and not rt.cur_last_error:
+            rt.cur_last_error = f"ikke anvendt: {why}"
 
         def iso_ms(value: str) -> int | None:
             return planner.to_ms(value) if value else None
 
         action, wait_ms = guards.current_action(
             desired=desired,
-            actual=actual,
+            # Gemt men ikke anvendt tæller som "ikke sat" → send igen (med pauser)
+            actual=None if setting_ok else actual,
             write_inflight=self._write_inflight,
             attempts=rt.cur_attempts,
             last_write_ms=iso_ms(rt.cur_last_write_iso),
             last_change_ms=iso_ms(rt.cur_change_iso),
-            urgent=self._urgent_until is not None and now < self._urgent_until,
+            urgent=session_resend
+            or (self._urgent_until is not None and now < self._urgent_until),
             now_ms=planner.to_ms(now),
             confirm_ms=int(CURRENT_CONFIRM_DELAY.total_seconds() * 1000),
             retry_ms=tuple(int(d.total_seconds() * 1000) for d in CURRENT_RETRY_DELAYS),
@@ -883,7 +931,10 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         )
 
         if action == guards.CURRENT_WRITE:
-            if rt.cur_attempts == 0:
+            if session_resend:
+                self._session_send_at = None
+                _LOGGER.info("Ny session — sender %.0f A igen (Zaptec-anbefaling)", desired)
+            if rt.cur_attempts == 0 and not setting_ok:
                 rt.cur_change_iso = now.isoformat()
             rt.cur_attempts += 1
             rt.cur_last_write_iso = now.isoformat()
@@ -917,7 +968,13 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             note = f"Sætter {desired:.0f} A (laderen: {have})"
         if rt.cur_last_error:
             note += f" — seneste fejl: {rt.cur_last_error}"
+        if self._get_state(self._charger_entity("binary_sensor", "online")) == "off":
+            note = "Laderen er offline — " + note
         return note
+
+    def _charger_entity(self, domain: str, suffix: str) -> str | None:
+        """Zaptec-entitet for samme lader (fx sensor.<lader>_allocated_charge_current)."""
+        return guards.charger_entity(self._cfg(CONF_CHARGER_MODE_SENSOR), domain, suffix)
 
     async def _write_current(self, entity_id: str, value: float) -> None:
         """Send strømmen og VENT til kaldet er færdigt (inkl. Zaptecs egne genforsøg)."""
@@ -1152,6 +1209,9 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             rt.enabled = False
             rt.start_wait_since_iso = ""
             rt.start_failed_notified = False
+            # Zaptec læser MaxCurrent, når sessionen starter → send værdien igen bagefter
+            self._session_send_at = dt_util.utcnow() + SESSION_SETTLE
+            self._wake_in(SESSION_SETTLE.total_seconds() + 1)
             self._set_plan(None)
             self._notify(
                 "🔌 Bil tilsluttet",

@@ -27,6 +27,8 @@ POWER = "sensor.zag_charge_power"
 ENERGY = "sensor.zag_session_energy"
 CUR = "number.zag089363_available_current"
 SOC = "sensor.modely_battery_level"
+CCS = "sensor.zag_allocated_charge_current"  # Zaptec ChargeCurrentSet
+ONLINE = "binary_sensor.zag_online"
 
 REQ, CHG, FIN, DISC = (
     "connected_requesting",
@@ -67,14 +69,22 @@ class Zaptec:
         self.pending: float | None = None
         self.concurrent = 0
         self.max_concurrent = 0
+        # Strøm laderen faktisk bruger (ChargeCurrentSet). None = følger indstillingen;
+        # sat til et tal = laderen har IKKE fået nye værdier (fx offline).
+        self.frozen_ccs: float | None = None
+        self.online = True
+
+    @property
+    def ccs(self) -> float:
+        return self.current if self.frozen_ccs is None else self.frozen_ccs
 
     @property
     def mode(self) -> str:
         if not self.plugged:
             return DISC
-        if self.current >= 6 and self.car_draws:
+        if self.ccs >= 6 and self.car_draws:
             return CHG
-        if self.current >= 6:
+        if self.ccs >= 6:
             return FIN
         return REQ
 
@@ -82,6 +92,8 @@ class Zaptec:
         self.hass.states.async_set(MODE, self.mode)
         self.hass.states.async_set(POWER, "11.0" if self.mode == CHG else "0.0")
         self.hass.states.async_set(CUR, str(self.current), {"min": 0, "max": 32})
+        self.hass.states.async_set(CCS, str(self.ccs))
+        self.hass.states.async_set(ONLINE, "on" if self.online else "off")
 
     async def set_value(self, call) -> None:
         value = float(call.data["value"])
@@ -644,3 +656,79 @@ async def test_charger_max_current_is_used_even_if_other_entity_configured(sim, 
     d = await tick(S(0))
     assert writes == [(max_cur, 16.0)], "ingen kald til den utilgængelige entitet"
     assert zap.mode == CHG and d.desired_current == 16
+
+
+
+# ---------- Zaptec-anbefalinger: session, ChargeCurrentSet, offline ----------
+
+
+async def test_no_writes_without_session(sim):
+    """Zaptec: send ikke MaxCurrent før sessionen findes."""
+    c, zap, _, tick, *_ = sim
+    zap.plugged = False
+    zap.publish()
+    for sec in (-1000, -900, 0, 60):
+        d = await tick(S(sec))
+    assert zap.writes == []
+    assert "Ingen bil tilsluttet" in d.current_note
+
+
+async def test_new_session_resends_after_settle(sim):
+    """Zaptec: laderen læser MaxCurrent ved sessionsstart → send igen bagefter."""
+    c, zap, _, tick, *_ = sim
+    await tick(S(-1200))  # 0 A sat i den gamle session
+    assert zap.writes == [0.0]
+    zap.plugged = False
+    zap.publish()
+    await tick(S(-1100))
+    zap.plugged = True
+    zap.publish()
+    d = await tick(S(-1095))
+    assert zap.writes == [0.0], "venter til sessionen er registreret"
+    assert "Ny session" in d.current_note
+    await tick(S(-1095 + 21))
+    assert zap.writes == [0.0, 0.0], "samme værdi sendes én gang til efter sessionsstart"
+    await tick(S(-1095 + 90))
+    assert zap.writes == [0.0, 0.0], "kun én gang"
+
+
+async def test_setting_accepted_but_not_applied_is_resent(sim):
+    """Skyen har 16 A, men laderen bruger 0 A (ChargeCurrentSet) → send igen."""
+    c, zap, _, tick, *_ = sim
+    await tick(S(-1000))
+    assert zap.current == 0
+    zap.frozen_ccs = 0.0  # laderen får ikke nye værdier
+    zap.publish()
+    await tick(S(0))
+    assert zap.writes[-1] == 16.0 and zap.current == 16 and zap.ccs == 0
+    d = await tick(S(30))
+    assert len(zap.writes) == 2, "venter 60 s på at laderen anvender værdien"
+    d = await tick(S(61))
+    assert len(zap.writes) == 3 and zap.writes[-1] == 16.0
+    assert "ikke anvendt" in d.current_note
+    zap.frozen_ccs = None  # laderen er med igen
+    zap.publish()
+    d = await tick(S(200))
+    assert d.action == "charging" and c.runtime.cur_confirmed
+
+
+async def test_charging_while_zero_is_resent(sim):
+    """Indstillingen siger 0 A, men bilen lader alligevel → send 0 A igen."""
+    c, zap, _, tick, *_ = sim
+    await tick(S(-1000))
+    zap.frozen_ccs = 16.0
+    zap.publish()
+    c.hass.states.async_set(CCS, "unavailable")  # kun effekten afslører det
+    assert zap.mode == CHG and zap.current == 0
+    await tick(S(-900))
+    assert zap.writes[-1] == 0.0 and len(zap.writes) == 2
+
+
+async def test_offline_charger_is_reported(sim):
+    c, zap, _, tick, *_ = sim
+    await tick(S(-1000))
+    zap.online = False
+    zap.frozen_ccs = 0.0
+    zap.publish()
+    d = await tick(S(0))
+    assert d.current_note.startswith("Laderen er offline")

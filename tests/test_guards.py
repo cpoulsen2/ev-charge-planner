@@ -6,8 +6,10 @@ from custom_components.ev_charge_planner.guards import (
     CURRENT_IN_SYNC,
     CURRENT_WAIT,
     CURRENT_WRITE,
+    charger_entity,
     charger_max_current_entity,
     current_action,
+    current_applied,
     start_failure_state,
 )
 
@@ -154,3 +156,49 @@ def test_charger_max_current_entity_is_derived():
     assert charger_max_current_entity("sensor.something_else") is None
     assert charger_max_current_entity(None) is None
     assert charger_max_current_entity("sensor._charger_mode") is None
+
+
+
+def test_charger_entity_variants():
+    mode = "sensor.zag089363_charger_mode"
+    assert (
+        charger_entity(mode, "sensor", "allocated_charge_current")
+        == "sensor.zag089363_allocated_charge_current"
+    )
+    assert charger_entity(mode, "binary_sensor", "online") == "binary_sensor.zag089363_online"
+
+
+# ---------- current_applied (Zaptec: MaxCurrent OG ChargeCurrentSet) ----------
+
+
+def _ap(**kw):
+    d = dict(desired=16.0, setting=16.0, charge_current_set=16.0, power_flowing=True)
+    d.update(kw)
+    return current_applied(**d)
+
+
+def test_applied_when_setting_and_charger_agree():
+    assert _ap() == (True, "")
+    assert _ap(desired=0.0, setting=0.0, charge_current_set=0.0, power_flowing=False) == (
+        True,
+        "",
+    )
+
+
+def test_not_applied_when_setting_differs():
+    assert _ap(setting=0.0)[0] is False
+    assert _ap(setting=None)[0] is False
+
+
+def test_not_applied_when_charger_uses_other_current():
+    ok, why = _ap(charge_current_set=0.0)
+    assert not ok and "0 A" in why
+
+
+def test_not_applied_when_charging_but_should_be_off():
+    ok, why = _ap(desired=0.0, setting=0.0, charge_current_set=None, power_flowing=True)
+    assert not ok and "lader stadig" in why
+
+
+def test_unknown_charge_current_set_is_ignored():
+    assert _ap(charge_current_set=None) == (True, "")
