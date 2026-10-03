@@ -553,3 +553,45 @@ async def test_settings_step_can_change_price_and_current_entity(hass):
     assert data["current_entity"] == "number.zag089363_charger_max_current"
     assert data["tomorrow_sensor"] is None
     assert data["vehicles"], "bilerne bevares"
+
+
+async def test_wrong_tomorrow_sensor_falls_back_and_plans_tomorrow(sim, hass):
+    """03-10: afgang i morgen kl. 17, men planen lå i aften — morgendagens priser manglede."""
+    c, zap, clock, tick, make, entry = sim
+    now = S(-3600)
+    clock.t = now
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, "tomorrow_sensor": "binary_sensor.wrong_tomorrow"}
+    )
+    hass.states.async_set("binary_sensor.wrong_tomorrow", "off", {})
+    hass.states.async_set("sensor.price", "2.4", {"prices_today": _quarters(now, 96, 2.4)})
+    tomorrow = _quarters(now + timedelta(hours=24), 96, 2.0)
+    for q in tomorrow[40:64]:  # 6 timer billig strøm i morgen
+        q["price"] = 0.9
+    hass.states.async_set("binary_sensor.price_tomorrow", "on", {"prices_tomorrow": tomorrow})
+    c.runtime.departure_iso = (now + timedelta(hours=40)).isoformat()
+    c.recalculate()
+    blocks = c.plan_result.plan
+    assert blocks, "der skal være en plan"
+    cheap_start = planner_ms(now + timedelta(hours=34))
+    assert all(b.start_ms >= cheap_start for b in blocks), "planen skal ligge i de billige timer i morgen"
+    d = await tick(now)
+    assert "Priser kun til" not in d.reason
+
+
+async def test_missing_tomorrow_prices_are_explained(sim, hass):
+    c, zap, clock, tick, *_ = sim
+    now = S(-3600)
+    clock.t = now
+    zap.car_draws = False
+    zap.publish()
+    hass.states.async_set("sensor.price", "2.4", {"prices_today": _quarters(now, 20, 2.4)})
+    c.runtime.departure_iso = (now + timedelta(hours=40)).isoformat()
+    c.recalculate()
+    d = await tick(now)
+    assert "Priser kun til" in d.reason
+    assert d.warning == "prices_end_before_departure"
+
+
+def planner_ms(dt: datetime) -> int:
+    return int(dt.timestamp() * 1000)

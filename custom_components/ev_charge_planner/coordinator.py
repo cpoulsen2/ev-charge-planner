@@ -126,6 +126,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         self._wake_at: datetime | None = None
         self._closed = False
         self._price_count = 0
+        self.prices_until_ms: int | None = None  # sidste tidspunkt med kendte priser
 
     # ---------- persistens ----------
 
@@ -271,21 +272,20 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         rt.charge_state = "idle"
         rt.zero_power_ticks = 0
 
-    def _tomorrow_sensor_id(self) -> str | None:
-        """Sensor med morgendagens priser — eksplicit konfigureret eller auto-udledt.
-
-        Strømligning lægger morgendagens priser på en separat sensor
-        (fx sensor.stromligning_adjusted_price_vat →
-         binary_sensor.stromligning_adjusted_price_vat_tomorrow).
-        """
+    def tomorrow_sensor_candidates(self) -> list[str]:
+        """Morgendags-sensorer i prioriteret rækkefølge: den valgte, derefter den der
+        udledes af pris-sensorens navn. Har den valgte ingen priser (fx en forkert
+        sensor fra opsætningen), bruges den udledte i stedet."""
+        out: list[str] = []
         configured = self._opt(CONF_TOMORROW_SENSOR)
         if configured:
-            return configured
+            out.append(configured)
         price = self.price_sensor() or ""
         if price.startswith("sensor."):
-            obj = price.split(".", 1)[1]
-            return f"binary_sensor.{obj}_tomorrow"
-        return None
+            derived = f"binary_sensor.{price.split('.', 1)[1]}_tomorrow"
+            if derived not in out:
+                out.append(derived)
+        return out
 
     def price_sensor(self) -> str | None:
         return self._opt(CONF_PRICE_SENSOR) or None
@@ -306,8 +306,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         # Fald tilbage til den separate "tomorrow"-sensor hvis hovedsensoren ikke
         # selv har morgendagens priser
         if not raw_tomorrow:
-            tmr_id = self._tomorrow_sensor_id()
-            if tmr_id:
+            for tmr_id in self.tomorrow_sensor_candidates():
                 tmr = self.hass.states.get(tmr_id)
                 if tmr and tmr.state == "on":
                     raw_tomorrow = (
@@ -315,12 +314,18 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
                         or tmr.attributes.get("raw_tomorrow")
                         or []
                     )
+                if raw_tomorrow:
+                    break
         # Samme kvarter må ikke tælle to gange (fx hvis "prices" allerede har i morgen)
         seen = {planner.to_ms(e["start"]) for e in raw_today if "start" in e}
         raw_tomorrow = [
             e for e in raw_tomorrow if "start" in e and planner.to_ms(e["start"]) not in seen
         ]
         self._price_count = len(raw_today) + len(raw_tomorrow)
+        slots = planner.expand_mixed(list(raw_today) + list(raw_tomorrow))
+        self.prices_until_ms = (
+            max(sl.time_ms for sl in slots) + planner.SLOT_MS if slots else None
+        )
         return list(raw_today), list(raw_tomorrow)
 
     # ---------- deadline / live SoC ----------
@@ -554,6 +559,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             await self.async_save()
 
         decision = self._decide(mode)
+        self._warn_if_prices_end_before_departure(decision)
 
         # Hold laderens strøm på den ønskede værdi (gentag til den er sat)
         await self._reconcile_current(decision)
@@ -765,6 +771,24 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
                 next_slot=nxt.start_dt,
             )
         return dec(ACT_WAITING, "Alle slots er færdige", live_soc=live_soc)
+
+    def _warn_if_prices_end_before_departure(self, decision: Decision) -> None:
+        """Planen kan kun bruge kendte priser. Ligger afgangen efter dem (fx fordi
+        morgendagens priser mangler), siges det tydeligt i status."""
+        rt = self.runtime
+        if rt.active_vehicle == CHOOSE_VEHICLE or not rt.enabled or rt.force_charge:
+            return
+        if self.prices_until_ms is None:
+            return
+        deadline = self._deadline_ms()
+        if deadline is None or deadline <= self.prices_until_ms:
+            return
+        until = dt_util.as_local(dt_util.utc_from_timestamp(self.prices_until_ms / 1000))
+        decision.warning = "prices_end_before_departure"
+        decision.reason += (
+            f" · Priser kun til {until.strftime('%d/%m %H:%M')} — planen bruger ikke "
+            "tiden derefter (mangler morgendagens priser?)"
+        )
 
     # ---------- strømstyring ----------
 

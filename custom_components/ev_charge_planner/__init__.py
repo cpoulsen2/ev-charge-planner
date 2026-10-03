@@ -156,7 +156,7 @@ async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool
 
     # Genberegn plan når prisdata opdateres
     price_sensors = [
-        e for e in (coordinator.price_sensor(), coordinator._tomorrow_sensor_id()) if e
+        e for e in (coordinator.price_sensor(), *coordinator.tomorrow_sensor_candidates()) if e
     ]
     if price_sensors:
 

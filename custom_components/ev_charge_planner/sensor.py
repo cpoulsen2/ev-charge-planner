@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import EvcpCoordinator
@@ -84,6 +85,11 @@ class StatusSensor(EvcpEntity, SensorEntity):
             "desired_current": d.desired_current,
             "actual_current": d.actual_current,
             "current_note": d.current_note,
+            "prices_until": (
+                dt_util.utc_from_timestamp(self.coordinator.prices_until_ms / 1000).isoformat()
+                if self.coordinator.prices_until_ms
+                else None
+            ),
             "vehicle": self.runtime.active_vehicle,
             "force_charge": self.runtime.force_charge,
             "session_complete": self.runtime.session_complete,
