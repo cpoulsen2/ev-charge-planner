@@ -617,3 +617,30 @@ async def test_tomorrow_sensor_with_prices_attribute(sim, hass):
     cheap_start = planner_ms(now + timedelta(hours=34))
     assert c.plan_result.plan
     assert all(b.start_ms >= cheap_start for b in c.plan_result.plan)
+
+
+async def test_charger_max_current_is_used_even_if_other_entity_configured(sim, hass):
+    """03-10: available_current var utilgængelig — laderens max-strøm skal bruges."""
+    c, zap, clock, tick, *_ = sim
+    max_cur = "number.zag_charger_max_current"  # udledt af sensor.zag_charger_mode
+    writes: list[tuple[str, float]] = []
+
+    async def set_value(call):
+        writes.append((call.data["entity_id"], float(call.data["value"])))
+        if call.data["entity_id"] == max_cur:
+            zap.current = float(call.data["value"])
+            zap.publish()
+            hass.states.async_set(max_cur, str(zap.current), {"min": 0, "max": 20})
+
+    hass.services.async_register("number", "set_value", set_value)
+    hass.states.async_set(CUR, "unavailable")
+    hass.states.async_set(max_cur, "0.0", {"min": 0, "max": 20})
+    zap.current = 0.0
+    zap.publish()
+    hass.states.async_set(CUR, "unavailable")
+    hass.states.async_set(max_cur, "0.0", {"min": 0, "max": 20})
+    assert c.current_entity() == max_cur
+    await tick(S(-1000))
+    d = await tick(S(0))
+    assert writes == [(max_cur, 16.0)], "ingen kald til den utilgængelige entitet"
+    assert zap.mode == CHG and d.desired_current == 16

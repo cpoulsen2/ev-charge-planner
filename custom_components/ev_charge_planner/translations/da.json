@@ -10,7 +10,7 @@
           "charger_mode_sensor": "Lader-mode sensor",
           "charge_power_sensor": "Ladeeffekt-sensor",
           "session_energy_sensor": "Session-energi sensor (kWh)",
-          "current_entity": "Strøm-entitet (fx number.zag089363_charger_max_current eller number.zag089363_available_current)",
+          "current_entity": "Strøm-entitet (valgfri — laderens number.…_charger_max_current findes automatisk og bruges altid, når den findes)",
           "charge_current": "Ladestrøm i ladeslots (A)",
           "notify_service": "Notify-service (valgfri, fx notify.mobile_app_iphone_cp)"
         }
@@ -74,7 +74,7 @@
         "data": {
           "price_sensor": "Pris-sensor (fx sensor.stromligning_adjusted_price_vat)",
           "tomorrow_sensor": "Morgendagens pris-sensor (valgfri — findes automatisk)",
-          "current_entity": "Strøm-entitet (fx number.zag089363_charger_max_current eller number.zag089363_available_current)",
+          "current_entity": "Strøm-entitet (valgfri — laderens number.…_charger_max_current findes automatisk og bruges altid, når den findes)",
           "charge_current": "Ladestrøm i ladeslots (A)",
           "min_block_minutes": "Minimum blokstørrelse (min)"
         }

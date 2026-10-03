@@ -181,7 +181,16 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         return self.entry.data.get(key, default)
 
     def current_entity(self) -> str | None:
-        return self._opt(CONF_CURRENT_ENTITY) or None
+        """Strøm-entiteten laderen styres med.
+
+        Laderens egen max-strøm (fx number.zag089363_charger_max_current, udledt af
+        charger mode-sensoren) bruges altid, når den findes — den er bevist at virke
+        (0 A = pause, 16 A = lader). Den valgte entitet er kun en reserve.
+        """
+        derived = guards.charger_max_current_entity(self._cfg(CONF_CHARGER_MODE_SENSOR))
+        if derived and self.hass.states.get(derived) is not None:
+            return derived
+        return self._opt(CONF_CURRENT_ENTITY) or derived or None
 
     def charge_amps(self) -> float:
         """Ladestrøm i A — aldrig over hvad strøm-entiteten tillader."""

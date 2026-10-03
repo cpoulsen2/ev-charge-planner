@@ -48,7 +48,7 @@ def _data_schema() -> vol.Schema:
             vol.Required(CONF_CHARGER_MODE_SENSOR): _SENSOR,
             vol.Required(CONF_CHARGE_POWER_SENSOR): _SENSOR,
             vol.Required(CONF_SESSION_ENERGY_SENSOR): _SENSOR,
-            vol.Required(CONF_CURRENT_ENTITY): _NUMBER,
+            vol.Optional(CONF_CURRENT_ENTITY): _NUMBER,
             vol.Required(CONF_CHARGE_CURRENT, default=DEFAULT_CHARGE_CURRENT): _AMPS,
             vol.Optional(CONF_NOTIFY_SERVICE, default=""): _TEXT,
         }
@@ -251,7 +251,7 @@ class EvcpOptionsFlow(OptionsFlow):
                 {
                     CONF_PRICE_SENSOR: user_input[CONF_PRICE_SENSOR],
                     CONF_TOMORROW_SENSOR: user_input.get(CONF_TOMORROW_SENSOR) or None,
-                    CONF_CURRENT_ENTITY: user_input[CONF_CURRENT_ENTITY],
+                    CONF_CURRENT_ENTITY: user_input.get(CONF_CURRENT_ENTITY) or None,
                     CONF_CHARGE_CURRENT: int(user_input[CONF_CHARGE_CURRENT]),
                     CONF_MIN_BLOCK_MINUTES: int(user_input[CONF_MIN_BLOCK_MINUTES]),
                 }
@@ -274,7 +274,7 @@ class EvcpOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_TOMORROW_SENSOR, description={"suggested_value": tomorrow}
                 ): _BINARY,
-                vol.Required(
+                vol.Optional(
                     CONF_CURRENT_ENTITY, description={"suggested_value": entity}
                 ): _NUMBER,
                 vol.Required(CONF_CHARGE_CURRENT, default=amps): _AMPS,

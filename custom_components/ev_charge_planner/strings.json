@@ -10,7 +10,7 @@
           "charger_mode_sensor": "Charger mode sensor",
           "charge_power_sensor": "Charge power sensor",
           "session_energy_sensor": "Session energy sensor (kWh)",
-          "current_entity": "Current entity (e.g. number.zag089363_charger_max_current or number.zag089363_available_current)",
+          "current_entity": "Current entity (optional — the charger's number.…_charger_max_current is found automatically and always used when it exists)",
           "charge_current": "Charge current in charge slots (A)",
           "notify_service": "Notify service (optional, e.g. notify.mobile_app_iphone_cp)"
         }
@@ -74,7 +74,7 @@
         "data": {
           "price_sensor": "Price sensor (e.g. sensor.stromligning_adjusted_price_vat)",
           "tomorrow_sensor": "Tomorrow price sensor (optional — found automatically)",
-          "current_entity": "Current entity (e.g. number.zag089363_charger_max_current or number.zag089363_available_current)",
+          "current_entity": "Current entity (optional — the charger's number.…_charger_max_current is found automatically and always used when it exists)",
           "charge_current": "Charge current in charge slots (A)",
           "min_block_minutes": "Minimum block size (min)"
         }

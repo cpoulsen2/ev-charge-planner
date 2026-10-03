@@ -18,6 +18,7 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
+from . import guards
 from .const import (
     CONF_CHARGE_CURRENT,
     CONF_CHARGE_POWER_SENSOR,
@@ -175,6 +176,8 @@ async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool
         entry.data.get(CONF_CHARGER_MODE_SENSOR),
         entry.data.get(CONF_CHARGE_POWER_SENSOR),
         coordinator.current_entity(),
+        guards.charger_max_current_entity(entry.data.get(CONF_CHARGER_MODE_SENSOR)),
+        entry.options.get(CONF_CURRENT_ENTITY) or entry.data.get(CONF_CURRENT_ENTITY),
     ]
     charger_signals = [e for e in charger_signals if e]
     if charger_signals:
@@ -198,7 +201,11 @@ async def _async_reload(hass: "HomeAssistant", entry: "ConfigEntry") -> None:
 
 def _restore_normal_current(hass: "HomeAssistant", entry: "ConfigEntry") -> None:
     """Sæt laderen tilbage til normal ladestrøm, så den virker uden planneren."""
-    entity = entry.options.get(CONF_CURRENT_ENTITY) or entry.data.get(CONF_CURRENT_ENTITY)
+    derived = guards.charger_max_current_entity(entry.data.get(CONF_CHARGER_MODE_SENSOR))
+    if derived and hass.states.get(derived) is not None:
+        entity = derived
+    else:
+        entity = entry.options.get(CONF_CURRENT_ENTITY) or entry.data.get(CONF_CURRENT_ENTITY)
     amps = entry.options.get(
         CONF_CHARGE_CURRENT, entry.data.get(CONF_CHARGE_CURRENT, DEFAULT_CHARGE_CURRENT)
     )

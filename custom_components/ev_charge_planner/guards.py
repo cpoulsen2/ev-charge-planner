@@ -13,6 +13,22 @@ melder den ønskede værdi tilbage.
 
 from __future__ import annotations
 
+
+def charger_max_current_entity(charger_mode_sensor: str | None) -> str | None:
+    """Laderens egen max-strøm-entitet, udledt af charger mode-sensoren.
+
+    ``sensor.zag089363_charger_mode`` → ``number.zag089363_charger_max_current``
+    (Zaptec-integrationens navngivning). None hvis navnet ikke følger mønstret.
+    """
+    prefix, suffix = "sensor.", "_charger_mode"
+    if not charger_mode_sensor:
+        return None
+    if not (charger_mode_sensor.startswith(prefix) and charger_mode_sensor.endswith(suffix)):
+        return None
+    charger = charger_mode_sensor[len(prefix) : -len(suffix)]
+    return f"number.{charger}_charger_max_current" if charger else None
+
+
 CURRENT_IN_SYNC = "in_sync"
 CURRENT_WRITE = "write"
 CURRENT_WAIT = "wait"

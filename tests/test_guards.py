@@ -6,6 +6,7 @@ from custom_components.ev_charge_planner.guards import (
     CURRENT_IN_SYNC,
     CURRENT_WAIT,
     CURRENT_WRITE,
+    charger_max_current_entity,
     current_action,
     start_failure_state,
 )
@@ -140,3 +141,16 @@ def test_timer_gate_is_outcome_not_mode():
     now = 9_000_000
     _, notify = _fail(wait_since_ms=now - (6 * MIN), now_ms=now)
     assert notify is True
+
+
+# ---------- laderens max-strøm-entitet ----------
+
+
+def test_charger_max_current_entity_is_derived():
+    assert (
+        charger_max_current_entity("sensor.zag089363_charger_mode")
+        == "number.zag089363_charger_max_current"
+    )
+    assert charger_max_current_entity("sensor.something_else") is None
+    assert charger_max_current_entity(None) is None
+    assert charger_max_current_entity("sensor._charger_mode") is None
