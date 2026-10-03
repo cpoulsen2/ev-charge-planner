@@ -18,10 +18,8 @@ PLATFORMS = [
 
 UPDATE_INTERVAL = timedelta(seconds=60)
 
-# --- Lademodus ---
-MODE_STANDARD = "Standard"
-MODE_DEPARTURE = "Afgang"
-CHARGE_MODES = [MODE_STANDARD, MODE_DEPARTURE]
+# --- Afgang (eneste tilstand): klar til afrejsetiden ---
+DEFAULT_DEPARTURE_HOUR = 7  # afgang sættes til næste kl. 07:00 når en bil tilsluttes
 
 # --- Køretøjsvalg ---
 CHOOSE_VEHICLE = "Vælg bil"  # standard/ingen bil valgt
@@ -31,7 +29,6 @@ GUEST_VEHICLE = "Guest"
 DEFAULT_POWER_KW = 11.0
 DEFAULT_TARGET_SOC = 80.0
 DEFAULT_GUEST_CAPACITY_KWH = 60.0
-STANDARD_DEADLINE_HOUR = 6  # Standard-mode: klar inden kl. 06:00
 
 # --- Car-side stop detection ---
 CHARGE_POWER_THRESHOLD_KW = 0.1  # under dette regnes som "ingen strøm flyder"

@@ -85,7 +85,6 @@ class StatusSensor(EvcpEntity, SensorEntity):
             "actual_current": d.actual_current,
             "current_note": d.current_note,
             "vehicle": self.runtime.active_vehicle,
-            "mode": self.runtime.mode,
             "force_charge": self.runtime.force_charge,
             "session_complete": self.runtime.session_complete,
             "plan": blocks,

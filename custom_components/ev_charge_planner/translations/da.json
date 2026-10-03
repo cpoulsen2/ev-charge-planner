@@ -86,8 +86,7 @@
   },
   "entity": {
     "select": {
-      "active_vehicle": { "name": "Aktiv bil" },
-      "mode": { "name": "Lademodus" }
+      "active_vehicle": { "name": "Aktiv bil" }
     },
     "number": {
       "current_soc": { "name": "Batteri %" },

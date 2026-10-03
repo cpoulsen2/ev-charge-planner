@@ -17,7 +17,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import custom_components.ev_charge_planner as integration
 from custom_components.ev_charge_planner import coordinator as coord_mod
-from custom_components.ev_charge_planner.const import CHOOSE_VEHICLE, DOMAIN, MODE_STANDARD
+from custom_components.ev_charge_planner.const import CHOOSE_VEHICLE, DOMAIN
 from custom_components.ev_charge_planner.coordinator import EvcpCoordinator
 from custom_components.ev_charge_planner.models import RuntimeStore
 from custom_components.ev_charge_planner.planner import PlanBlock, PlanResult
@@ -139,6 +139,10 @@ def _entry(**opts) -> MockConfigEntry:
 async def sim(hass, monkeypatch):
     clock = Clock(S(-600))
     monkeypatch.setattr(coord_mod.dt_util, "utcnow", clock)
+    tz = coord_mod.dt_util.DEFAULT_TIME_ZONE
+    monkeypatch.setattr(
+        coord_mod.dt_util, "now", lambda time_zone=None: clock.t.astimezone(time_zone or tz)
+    )
 
     zap = Zaptec(hass)
     zap.publish()
@@ -161,7 +165,7 @@ async def sim(hass, monkeypatch):
     rt.active_vehicle = "Model Y"
     rt.enabled = True
     rt.observer_mode = False
-    rt.mode = MODE_STANDARD
+    rt.departure_iso = S(6 * 3600).isoformat()
     rt.target_soc = 80
     c._prev_charger_mode = zap.mode
     c._set_plan(
@@ -435,11 +439,73 @@ async def test_unavailable_current_entity_is_explained_and_not_written(sim, hass
     assert "utilgængelig" in d.current_note
 
 
-async def test_new_runtime_defaults_to_departure_mode():
-    from custom_components.ev_charge_planner.const import MODE_DEPARTURE
+def _is_next_7(dep_iso: str, now: datetime) -> bool:
+    from custom_components.ev_charge_planner.coordinator import dt_util
+
+    dep = dt_util.parse_datetime(dep_iso)
+    local = dt_util.as_local(dep)
+    return (
+        local.hour == 7
+        and local.minute == 0
+        and dep > now
+        and dep - now <= timedelta(hours=24)
+    )
+
+
+async def test_plugin_sets_departure_to_next_7(sim):
+    c, zap, clock, tick, *_ = sim
+    c.runtime.departure_iso = S(30 * 3600).isoformat()  # brugerens gamle valg
+    zap.plugged = False
+    zap.publish()
+    await tick(S(-900))
+    zap.plugged = True
+    zap.publish()
+    await tick(S(-800))
+    assert _is_next_7(c.runtime.departure_iso, S(-800))
+
+
+async def test_passed_departure_rolls_to_next_morning(sim):
+    """Som den gamle Standard: bliver bilen siddende, gælder næste kl. 07:00."""
+    c, zap, clock, tick, *_ = sim
+    c.runtime.departure_iso = S(-60).isoformat()
+    d = await tick(S(0))
+    assert _is_next_7(c.runtime.departure_iso, S(0))
+    assert c.runtime.enabled, "automatikken slår ikke sig selv fra"
+    assert d.action != "idle"
+
+
+async def test_runtime_has_no_charge_mode():
     from custom_components.ev_charge_planner.models import Runtime
 
-    assert Runtime().mode == MODE_DEPARTURE
+    assert not hasattr(Runtime(), "mode")
+
+
+async def test_old_mode_select_is_removed(hass):
+    from homeassistant.helpers import entity_registry as er
+
+    from custom_components.ev_charge_planner import select as select_platform
+
+    entry = _entry()
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    registry.async_get_or_create(
+        "select", DOMAIN, f"{entry.entry_id}_mode", config_entry=entry
+    )
+    assert registry.async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_mode")
+
+    class _C:
+        pass
+
+    coordinator = _C()
+    coordinator.entry = entry
+    coordinator.runtime = None
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    added = []
+    try:
+        await select_platform.async_setup_entry(hass, entry, added.extend)
+    except Exception:  # noqa: BLE001 — kun fjernelsen testes her
+        pass
+    assert registry.async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_mode") is None
 
 
 async def test_settings_step_can_change_price_and_current_entity(hass):

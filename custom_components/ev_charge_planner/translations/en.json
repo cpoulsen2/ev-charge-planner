@@ -86,8 +86,7 @@
   },
   "entity": {
     "select": {
-      "active_vehicle": { "name": "Active vehicle" },
-      "mode": { "name": "Charge mode" }
+      "active_vehicle": { "name": "Active vehicle" }
     },
     "number": {
       "current_soc": { "name": "Battery %" },

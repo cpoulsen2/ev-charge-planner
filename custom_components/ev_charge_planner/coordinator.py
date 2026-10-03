@@ -52,14 +52,12 @@ from .const import (
     CURRENT_MIN_CHANGE_INTERVAL,
     CURRENT_RETRY_DELAYS,
     DEFAULT_CHARGE_CURRENT,
+    DEFAULT_DEPARTURE_HOUR,
     EVENT_ACTION,
     NOTIFY_CLICK_PATH,
     NOTIFY_DEFAULTS,
     GUEST_VEHICLE,
-    MODE_DEPARTURE,
-    MODE_STANDARD,
     SLOW_CALL_WARNING,
-    STANDARD_DEADLINE_HOUR,
     START_FAILED_TIMEOUT,
     UPDATE_INTERVAL,
     USER_ACTION_URGENCY,
@@ -327,26 +325,36 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
 
     # ---------- deadline / live SoC ----------
 
-    def maintain_departure(self) -> bool:
-        """Hold afrejse-datoen i fremtiden. Er den tom eller passeret, sættes den
-        til NÆSTE kl. 07:00 (dvs. i morgen tidlig når man sætter den om aftenen).
-        Returnerer True hvis værdien blev ændret."""
+    @staticmethod
+    def _next_default_departure() -> datetime:
+        """Næste kl. 07:00 (i morgen tidlig når bilen sættes i om aftenen)."""
         now = dt_util.now()  # lokal, aware
-        dep = dt_util.parse_datetime(self.runtime.departure_iso) if self.runtime.departure_iso else None
+        nxt = now.replace(hour=DEFAULT_DEPARTURE_HOUR, minute=0, second=0, microsecond=0)
+        if nxt <= now:
+            nxt = nxt + timedelta(days=1)
+        return nxt
+
+    def reset_departure(self) -> None:
+        """Ny tilslutning: afgang = næste kl. 07:00 (kan ændres bagefter)."""
+        self.runtime.departure_iso = self._next_default_departure().isoformat()
+
+    def maintain_departure(self) -> bool:
+        """Hold afrejse-datoen i fremtiden. Er den tom eller passeret, sættes den til
+        næste kl. 07:00 — som den gamle Standard-tilstand: bliver bilen siddende,
+        gælder næste morgen kl. 07:00. Returnerer True hvis værdien blev ændret."""
+        rt = self.runtime
+        dep = dt_util.parse_datetime(rt.departure_iso) if rt.departure_iso else None
         if dep is not None and dep.tzinfo is None:
             dep = dt_util.as_local(dep)
-        if dep is None or dep <= now:
-            nxt = now.replace(hour=7, minute=0, second=0, microsecond=0)
-            if nxt <= now:
-                nxt = nxt + timedelta(days=1)
-            self.runtime.departure_iso = nxt.isoformat()
+        if dep is None or dep <= dt_util.now():
+            self.reset_departure()
             return True
         return False
 
     def _window_start_ms(self) -> int | None:
         """Ladevindue: tidligst-start (kun i Afgang når slået til). None = ingen grænse."""
         rt = self.runtime
-        if rt.mode != MODE_DEPARTURE or not rt.use_earliest_start or not rt.earliest_start_iso:
+        if not rt.use_earliest_start or not rt.earliest_start_iso:
             return None
         dep = dt_util.parse_datetime(rt.earliest_start_iso)
         if dep is None:
@@ -357,15 +365,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
 
     def _deadline_ms(self) -> int | None:
         rt = self.runtime
-        now = dt_util.now()  # lokal, aware
-        if rt.mode == MODE_STANDARD:
-            deadline = now.replace(
-                hour=STANDARD_DEADLINE_HOUR, minute=0, second=0, microsecond=0
-            )
-            if deadline <= now:
-                deadline = deadline + timedelta(days=1)
-            return planner.to_ms(deadline)
-        # Afgang: brug den (auto-vedligeholdte) afrejse-dato+tid
+        # Afgang: brug afrejse-dato+tid (næste kl. 07:00 når bilen tilsluttes)
         self.maintain_departure()
         dep = dt_util.parse_datetime(rt.departure_iso) if rt.departure_iso else None
         if dep is None:
@@ -542,7 +542,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         rt = self.runtime
         mode = self._charger_mode()
 
-        # Hold afrejse-datoen i fremtiden (auto til næste kl. 07:00)
+        # Afrejsetid mangler (fx ny opsætning) → næste kl. 07:00
         if self.maintain_departure():
             await self.async_save()
 
@@ -638,7 +638,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         now_ms = planner.to_ms(dt_util.utcnow())
 
         # Afgang: afrejsetid passeret → session slut, sluk automatik (og stop ladning)
-        if rt.mode == MODE_DEPARTURE and not rt.force_charge:
+        if not rt.force_charge:
             dl = self._deadline_ms()
             if dl is not None and now_ms >= dl:
                 if rt.enabled:
@@ -1113,6 +1113,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             rt.enabled = False
             rt.start_wait_since_iso = ""
             rt.start_failed_notified = False
+            self.reset_departure()
             self._set_plan(None)
             self._notify(
                 "🔌 Bil tilsluttet",

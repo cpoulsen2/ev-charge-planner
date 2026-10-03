@@ -13,7 +13,6 @@ from .const import (
     DEFAULT_POWER_KW,
     DEFAULT_TARGET_SOC,
     DOMAIN,
-    MODE_DEPARTURE,
 )
 
 STORAGE_VERSION = 1
@@ -52,7 +51,6 @@ class Runtime:
 
     # --- Brugerkontroller ---
     active_vehicle: str = CHOOSE_VEHICLE
-    mode: str = MODE_DEPARTURE  # Afgang er standard (dashboardet har ingen Standard-knap)
     current_soc: float = 0.0
     target_soc: float = DEFAULT_TARGET_SOC
     guest_capacity: float = DEFAULT_GUEST_CAPACITY_KWH
