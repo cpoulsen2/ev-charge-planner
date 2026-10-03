@@ -15,26 +15,28 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
-    CONF_AUTHORIZE_BUTTON,
+    CONF_CHARGE_CURRENT,
     CONF_CHARGE_POWER_SENSOR,
     CONF_CHARGER_MODE_SENSOR,
-    CONF_DEAUTHORIZE_BUTTON,
+    CONF_CURRENT_ENTITY,
     CONF_MIN_BLOCK_MINUTES,
     CONF_NOTIFY_SERVICE,
     CONF_PRICE_SENSOR,
-    CONF_RESUME_BUTTON,
     CONF_SESSION_ENERGY_SENSOR,
     CONF_NOTIFY_TARGETS,
-    CONF_STOP_BUTTON,
     CONF_TOMORROW_SENSOR,
     CONF_VEHICLES,
+    DEFAULT_CHARGE_CURRENT,
     DOMAIN,
     NOTIFY_DEFAULTS,
 )
 
 _SENSOR = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
 _BINARY = selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor"))
-_BUTTON = selector.EntitySelector(selector.EntitySelectorConfig(domain="button"))
+_NUMBER = selector.EntitySelector(selector.EntitySelectorConfig(domain="number"))
+_AMPS = selector.NumberSelector(
+    selector.NumberSelectorConfig(min=6, max=32, step=1, unit_of_measurement="A")
+)
 _TEXT = selector.TextSelector()
 
 
@@ -46,10 +48,8 @@ def _data_schema() -> vol.Schema:
             vol.Required(CONF_CHARGER_MODE_SENSOR): _SENSOR,
             vol.Required(CONF_CHARGE_POWER_SENSOR): _SENSOR,
             vol.Required(CONF_SESSION_ENERGY_SENSOR): _SENSOR,
-            vol.Required(CONF_AUTHORIZE_BUTTON): _BUTTON,
-            vol.Optional(CONF_DEAUTHORIZE_BUTTON): _BUTTON,
-            vol.Required(CONF_RESUME_BUTTON): _BUTTON,
-            vol.Required(CONF_STOP_BUTTON): _BUTTON,
+            vol.Required(CONF_CURRENT_ENTITY): _NUMBER,
+            vol.Required(CONF_CHARGE_CURRENT, default=DEFAULT_CHARGE_CURRENT): _AMPS,
             vol.Optional(CONF_NOTIFY_SERVICE, default=""): _TEXT,
         }
     )
@@ -248,11 +248,22 @@ class EvcpOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         if user_input is not None:
             return self._save(
-                {CONF_MIN_BLOCK_MINUTES: int(user_input[CONF_MIN_BLOCK_MINUTES])}
+                {
+                    CONF_CURRENT_ENTITY: user_input[CONF_CURRENT_ENTITY],
+                    CONF_CHARGE_CURRENT: int(user_input[CONF_CHARGE_CURRENT]),
+                    CONF_MIN_BLOCK_MINUTES: int(user_input[CONF_MIN_BLOCK_MINUTES]),
+                }
             )
-        current = self._entry.options.get(CONF_MIN_BLOCK_MINUTES, 0)
+        opts, data = self._entry.options, self._entry.data
+        current = opts.get(CONF_MIN_BLOCK_MINUTES, 0)
+        entity = opts.get(CONF_CURRENT_ENTITY) or data.get(CONF_CURRENT_ENTITY)
+        amps = opts.get(CONF_CHARGE_CURRENT, data.get(CONF_CHARGE_CURRENT, DEFAULT_CHARGE_CURRENT))
         schema = vol.Schema(
             {
+                vol.Required(
+                    CONF_CURRENT_ENTITY, description={"suggested_value": entity}
+                ): _NUMBER,
+                vol.Required(CONF_CHARGE_CURRENT, default=amps): _AMPS,
                 vol.Required(CONF_MIN_BLOCK_MINUTES, default=current): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0, max=240, step=15, unit_of_measurement="min"

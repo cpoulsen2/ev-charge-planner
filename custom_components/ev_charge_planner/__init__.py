@@ -19,9 +19,12 @@ import os
 from typing import TYPE_CHECKING
 
 from .const import (
+    CONF_CHARGE_CURRENT,
     CONF_CHARGE_POWER_SENSOR,
     CONF_CHARGER_MODE_SENSOR,
+    CONF_CURRENT_ENTITY,
     CONF_PRICE_SENSOR,
+    DEFAULT_CHARGE_CURRENT,
     DOMAIN,
     PLATFORMS,
 )
@@ -157,21 +160,20 @@ async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool
     if price_sensor:
 
         async def _on_price_change(_event) -> None:
-            await coordinator.async_user_changed()
+            await coordinator.async_user_changed(urgent=False)
 
         entry.async_on_unload(
             async_track_state_change_event(hass, [price_sensor], _on_price_change)
         )
 
-    # Reagér straks når laderen skifter mode/effekt i stedet for at vente på næste
-    # 60-sekunders tick. Kritisk for start-latens: efter et resume-tryk skifter
-    # laderen finished→requesting, hvor authorize først er muligt — uden denne lytter
-    # ventede _decide() op til 60 s. Bruger den debouncede request_refresh (leading-edge,
-    # ~10 s cooldown), så en burst af effekt-ændringer under ladning ikke giver en
-    # beslutnings-storm. Ingen genberegning af planen — kun ny beslutning/aktuering.
+    # Reagér straks når laderen skifter mode/effekt, eller når strøm-entiteten melder
+    # en ny værdi (bekræftelse af vores kald / ændring udefra), i stedet for at vente
+    # på næste 60-sekunders tick. Debounced request_refresh (leading-edge, ~10 s
+    # cooldown), så en burst af ændringer ikke giver en beslutnings-storm.
     charger_signals = [
         entry.data.get(CONF_CHARGER_MODE_SENSOR),
         entry.data.get(CONF_CHARGE_POWER_SENSOR),
+        coordinator.current_entity(),
     ]
     charger_signals = [e for e in charger_signals if e]
     if charger_signals:
@@ -193,6 +195,22 @@ async def _async_reload(hass: "HomeAssistant", entry: "ConfigEntry") -> None:
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+def _restore_normal_current(hass: "HomeAssistant", entry: "ConfigEntry") -> None:
+    """Sæt laderen tilbage til normal ladestrøm, så den virker uden planneren."""
+    entity = entry.options.get(CONF_CURRENT_ENTITY) or entry.data.get(CONF_CURRENT_ENTITY)
+    amps = entry.options.get(
+        CONF_CHARGE_CURRENT, entry.data.get(CONF_CHARGE_CURRENT, DEFAULT_CHARGE_CURRENT)
+    )
+    if not entity or hass.states.get(entity) is None:
+        return
+    _LOGGER.info("Planneren er slået fra — sætter %s til %s A", entity, amps)
+    hass.async_create_task(
+        hass.services.async_call(
+            "number", "set_value", {"entity_id": entity, "value": float(amps)}
+        )
+    )
+
+
 async def async_unload_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool:
     """Fjern en config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
@@ -200,4 +218,19 @@ async def async_unload_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> boo
         coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
         if coordinator is not None:
             coordinator.async_close()
+            # Slået fra af brugeren (ikke en genindlæsning): laderen skal virke normalt
+            # igen — ellers ville den blive stående på 0 A. Ikke i observatør-tilstand,
+            # hvor planneren aldrig har rørt strømmen.
+            if entry.disabled_by is not None and not coordinator.runtime.observer_mode:
+                _restore_normal_current(hass, entry)
     return unload_ok
+
+
+async def async_remove_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> None:
+    """Integrationen slettes: laderen skal virke normalt igen."""
+    from .models import RuntimeStore
+
+    store = RuntimeStore(hass, entry.entry_id)
+    runtime = await store.load()
+    if not runtime.observer_mode:
+        _restore_normal_current(hass, entry)

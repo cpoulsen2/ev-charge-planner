@@ -37,16 +37,18 @@ STANDARD_DEADLINE_HOUR = 6  # Standard-mode: klar inden kl. 06:00
 CHARGE_POWER_THRESHOLD_KW = 0.1  # under dette regnes som "ingen strøm flyder"
 CAR_SIDE_STOP_TICKS = 4  # antal minutter med 0 W efter ladning før "bilen stoppede selv"
 
-# --- Authorize-styring (Zaptec låser på dubletter — se guards.py) ---
-AUTHORIZE_MIN_INTERVAL = timedelta(minutes=3)  # hård backstop mellem to authorize-tryk
-START_FAILED_TIMEOUT = timedelta(minutes=5)  # giv op + notificér efter dette uden strøm i slot
-SLOT_START_DELAY = timedelta(seconds=45)  # første authorize i et slot: ikke præcis på kvarteret
-AUTHORIZE_CONFIRM_TIMEOUT = timedelta(seconds=45)  # ingen strøm så længe efter kaldet → redning
-DEAUTHORIZE_SETTLE = timedelta(seconds=10)  # stabil requesting efter deauthorize før authorize
-DEAUTHORIZE_MAX_WAIT = timedelta(seconds=90)  # kommer laderen ikke tilbage i requesting → opgiv
-DEAUTHORIZE_GRACE_PERIOD = timedelta(minutes=2)  # eget deauthorize ≠ kabel ud / bilskifte
-RESCUE_MAX_ROUNDS = 2  # deauthorize → authorize-runder før giv-op
-SLOW_PRESS_WARNING = timedelta(seconds=10)  # Zaptec-kald længere end dette er sandsynligvis gentaget
+# --- Strømstyring (laderen styres KUN via en strømgrænse: X A eller 0 A) ---
+DEFAULT_CHARGE_CURRENT = 16  # A i ladeslots / "Lad straks"
+CURRENT_CONFIRM_DELAY = timedelta(seconds=60)  # vent på at Zaptec melder ny værdi før genforsøg
+CURRENT_RETRY_DELAYS = (  # derefter: genforsøg med stigende pause
+    timedelta(minutes=2),
+    timedelta(minutes=5),
+    timedelta(minutes=10),
+)
+CURRENT_MIN_CHANGE_INTERVAL = timedelta(minutes=15)  # Zaptec: højst én ændring pr. 15 min
+USER_ACTION_URGENCY = timedelta(minutes=2)  # brugerhandling må ændre strømmen med det samme
+START_FAILED_TIMEOUT = timedelta(minutes=5)  # notificér hvis der ikke lades så længe i et slot
+SLOW_CALL_WARNING = timedelta(seconds=10)  # Zaptec-kald længere end dette logges som advarsel
 
 # --- Config entry: data (fast opsætning) ---
 CONF_PRICE_SENSOR = "price_sensor"
@@ -54,13 +56,13 @@ CONF_TOMORROW_SENSOR = "tomorrow_sensor"  # valgfri: sensor med morgendagens pri
 CONF_CHARGER_MODE_SENSOR = "charger_mode_sensor"
 CONF_CHARGE_POWER_SENSOR = "charge_power_sensor"
 CONF_SESSION_ENERGY_SENSOR = "session_energy_sensor"
-CONF_AUTHORIZE_BUTTON = "authorize_button"
-CONF_DEAUTHORIZE_BUTTON = "deauthorize_button"  # valgfri; ellers udledt af authorize-knappen
-CONF_RESUME_BUTTON = "resume_button"
-CONF_STOP_BUTTON = "stop_button"
 CONF_NOTIFY_SERVICE = "notify_service"
 
 # --- Config entry: options (kan ændres senere) ---
+# Strøm-entiteten (fx number.zag089363_available_current) og ladestrømmen ligger i
+# options, så de kan vælges under Konfigurér → Indstillinger (også på en gammel opsætning).
+CONF_CURRENT_ENTITY = "current_entity"
+CONF_CHARGE_CURRENT = "charge_current"
 CONF_VEHICLES = "vehicles"
 CONF_MIN_BLOCK_MINUTES = "min_block_minutes"
 CONF_NOTIFY_TARGETS = "notify_targets"  # liste af notify.*-tjenester

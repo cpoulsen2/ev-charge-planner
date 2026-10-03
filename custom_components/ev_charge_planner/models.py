@@ -80,19 +80,17 @@ class Runtime:
     plan_data: dict = field(default_factory=dict)
     prev_charger_mode: str = ""
 
-    # --- Authorize-styring (persisteret, så reload ikke udløser et nyt authorize) ---
-    authorize_done: bool = False  # authorize sendt i denne requesting-episode
-    last_authorize_iso: str = ""  # sidste authorize-tidspunkt — ryddes KUN ved disconnect
-    start_commanded_iso: str = ""  # sidste kommanderede start (flap-undertrykkelse)
-    start_wait_since_iso: str = ""  # udfaldsdrevet giv-op-timer: hvornår vi begyndte at vente
-    start_failed_notified: bool = False  # giv-op-notifikation sendt (én gang)
-    authorize_sent_iso: str = ""  # hvornår seneste authorize-kald til Zaptec blev FÆRDIGT
-    # Redning (deauthorize → vent → ét authorize) når et authorize ikke gav strøm
-    rescue_round: int = 0  # brugte runder i denne kabel-session
-    rescue_phase: str = ""  # "" | "deauthorized"
-    rescue_deauth_iso: str = ""  # hvornår vi trykkede deauthorize (grace-periode)
-    rescue_deauth_done_iso: str = ""  # hvornår deauthorize-kaldet var færdigt
-    ignored_disconnect: bool = False  # "frakoblet" set under grace — tjekkes bagefter
+    # --- Advarsel: skal lade, men der kommer ingen strøm ---
+    start_wait_since_iso: str = ""  # hvornår vi begyndte at vente på strøm i et slot
+    start_failed_notified: bool = False  # advarsel sendt (én gang pr. venteperiode)
+
+    # --- Strømstyring (persisteret, så genstart fortsætter hvor den slap) ---
+    cur_target: float = -1.0  # værdien vi forsøger at holde (-1 = ingen endnu)
+    cur_attempts: int = 0  # kald sendt for cur_target
+    cur_last_write_iso: str = ""  # seneste kald for cur_target
+    cur_change_iso: str = ""  # hvornår strømmen sidst blev sat til en NY værdi
+    cur_confirmed: bool = False  # laderen har meldt cur_target tilbage
+    cur_last_error: str = ""  # seneste fejl fra Zaptec (til status)
 
     def to_dict(self) -> dict:
         return asdict(self)

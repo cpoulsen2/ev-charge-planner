@@ -1,71 +1,89 @@
-"""Tests for den rene authorize-guard og giv-op-timer.
-
-Dækker accept-kriterierne fra rettelsesplanen (v0.8.1) der kan testes uden HA.
-"""
+"""Tests for den rene strømstyring og advarsels-timer (kan testes uden HA)."""
 
 from __future__ import annotations
 
 from custom_components.ev_charge_planner.guards import (
-    may_authorize,
+    CURRENT_IN_SYNC,
+    CURRENT_WAIT,
+    CURRENT_WRITE,
+    current_action,
     start_failure_state,
 )
 
+S = 1000
 MIN = 60_000  # ét minut i ms
-AUTH_INTERVAL = 3 * MIN
 FAIL_TIMEOUT = 5 * MIN
+T = 100_000_000
 
 
-def _auth(**kw) -> bool:
+def _cur(**kw):
     defaults = dict(
-        is_requesting=True,
-        authorize_done=False,
-        gave_up=False,
-        last_authorize_ms=None,
-        now_ms=1_000_000,
-        min_interval_ms=AUTH_INTERVAL,
+        desired=16.0,
+        actual=0.0,
+        write_inflight=False,
+        attempts=0,
+        last_write_ms=None,
+        last_change_ms=None,
+        urgent=False,
+        now_ms=T,
+        confirm_ms=60 * S,
+        retry_ms=(2 * MIN, 5 * MIN, 10 * MIN),
+        min_change_interval_ms=15 * MIN,
     )
     defaults.update(kw)
-    return may_authorize(**defaults)
+    return current_action(**defaults)
 
 
-# ---------- may_authorize ----------
+# ---------- current_action ----------
 
 
-def test_authorize_allowed_first_time_in_requesting():
-    assert _auth() is True
+def test_in_sync_does_nothing():
+    assert _cur(actual=16.0) == (CURRENT_IN_SYNC, 0)
+    assert _cur(desired=0.0, actual=0.0) == (CURRENT_IN_SYNC, 0)
+    assert _cur(actual=16.2) == (CURRENT_IN_SYNC, 0)
 
 
-def test_no_authorize_when_not_requesting():
-    # Kun connected_requesting må autorisere (aldrig i charging/finished/disconnected)
-    assert _auth(is_requesting=False) is False
+def test_first_write_is_immediate():
+    assert _cur() == (CURRENT_WRITE, 0)
 
 
-def test_no_second_authorize_in_same_episode():
-    # Accept-kriterie 1: højst ét authorize pr. requesting-episode
-    assert _auth(authorize_done=True) is False
+def test_unknown_actual_still_writes():
+    # Laderen melder ingen værdi (fx unavailable) — at sætte er ufarligt
+    assert _cur(actual=None) == (CURRENT_WRITE, 0)
 
 
-def test_gave_up_blocks_authorize():
-    # gave_up undertrykker authorize (men skal ikke røre resume — det håndteres i coordinator)
-    assert _auth(gave_up=True) is False
+def test_never_while_call_in_flight():
+    assert _cur(write_inflight=True, attempts=3, last_write_ms=T - 3600 * S)[0] == CURRENT_WAIT
 
 
-def test_backstop_blocks_within_interval():
-    # Accept-kriterie 8: backstoppen blokerer selv når authorize_done er False
-    # (fx efter en ikke-disconnect re-arm)
-    now = 10_000_000
-    assert _auth(authorize_done=False, last_authorize_ms=now - (2 * MIN), now_ms=now) is False
+def test_waits_for_confirmation_after_first_write():
+    assert _cur(attempts=1, last_write_ms=T - 30 * S) == (CURRENT_WAIT, 30 * S)
+    assert _cur(attempts=1, last_write_ms=T - 60 * S) == (CURRENT_WRITE, 0)
 
 
-def test_backstop_allows_after_interval():
-    now = 10_000_000
-    assert _auth(authorize_done=False, last_authorize_ms=now - (3 * MIN), now_ms=now) is True
+def test_retry_backoff_grows_and_caps():
+    assert _cur(attempts=2, last_write_ms=T - 1 * MIN) == (CURRENT_WAIT, 1 * MIN)
+    assert _cur(attempts=2, last_write_ms=T - 2 * MIN)[0] == CURRENT_WRITE
+    assert _cur(attempts=3, last_write_ms=T - 4 * MIN) == (CURRENT_WAIT, 1 * MIN)
+    assert _cur(attempts=4, last_write_ms=T - 9 * MIN) == (CURRENT_WAIT, 1 * MIN)
+    assert _cur(attempts=9, last_write_ms=T - 10 * MIN)[0] == CURRENT_WRITE
 
 
-def test_backstop_and_episode_are_independent():
-    # Selv efter intervallet er gået, blokerer episode-flaget stadig
-    now = 10_000_000
-    assert _auth(authorize_done=True, last_authorize_ms=now - (10 * MIN), now_ms=now) is False
+def test_planned_change_respects_15_minutes():
+    # Strømmen blev ændret for 5 min siden → planlagt ændring venter 10 min
+    assert _cur(last_change_ms=T - 5 * MIN) == (CURRENT_WAIT, 10 * MIN)
+    assert _cur(last_change_ms=T - 15 * MIN) == (CURRENT_WRITE, 0)
+
+
+def test_user_action_bypasses_15_minutes():
+    assert _cur(last_change_ms=T - 1 * MIN, urgent=True) == (CURRENT_WRITE, 0)
+
+
+def test_retries_are_not_blocked_by_15_minutes():
+    # 15-minutters-reglen gælder skift til en NY værdi, ikke genforsøg af samme
+    assert _cur(attempts=1, last_write_ms=T - 61 * S, last_change_ms=T - 61 * S)[0] == (
+        CURRENT_WRITE
+    )
 
 
 # ---------- start_failure_state ----------

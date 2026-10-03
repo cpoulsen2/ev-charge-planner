@@ -3,17 +3,15 @@
     "step": {
       "user": {
         "title": "EV Charge Planner",
-        "description": "Vælg dine Zaptec-entities og pris-sensor.",
+        "description": "Vælg pris-sensor, Zaptec-sensorer og den strøm-entitet laderen styres med (fx number.zag089363_available_current). Autorisation skal være slået fra i Zaptec.",
         "data": {
           "price_sensor": "Pris-sensor (Strømligning)",
           "tomorrow_sensor": "Morgendagens pris-sensor (valgfri, auto-detekteres)",
           "charger_mode_sensor": "Lader-mode sensor",
           "charge_power_sensor": "Ladeeffekt-sensor",
           "session_energy_sensor": "Session-energi sensor (kWh)",
-          "authorize_button": "Authorize-knap",
-          "deauthorize_button": "Deauthorize-knap (valgfri — findes automatisk)",
-          "resume_button": "Resume-knap",
-          "stop_button": "Stop-knap",
+          "current_entity": "Strøm-entitet (fx number.zag089363_available_current)",
+          "charge_current": "Ladestrøm i ladeslots (A)",
           "notify_service": "Notify-service (valgfri, fx notify.mobile_app_iphone_cp)"
         }
       }
@@ -72,7 +70,12 @@
       },
       "settings": {
         "title": "Indstillinger",
-        "data": { "min_block_minutes": "Minimum blokstørrelse (min)" }
+        "description": "Laderen styres via en strømgrænse: ladestrøm i ladeslots, ellers 0 A. Vælg Zaptec-installationens available current (fx number.zag089363_available_current). Autorisation skal være slået fra i Zaptec.",
+        "data": {
+          "current_entity": "Strøm-entitet (fx number.zag089363_available_current)",
+          "charge_current": "Ladestrøm i ladeslots (A)",
+          "min_block_minutes": "Minimum blokstørrelse (min)"
+        }
       }
     },
     "abort": {
