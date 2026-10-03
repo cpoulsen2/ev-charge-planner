@@ -90,6 +90,12 @@ class Runtime:
     cur_confirmed: bool = False  # laderen har meldt cur_target tilbage
     cur_last_error: str = ""  # seneste fejl fra Zaptec (til status)
 
+    # --- Session: max current 0 A til første slot, derefter ladekontakten ---
+    session_phase: str = ""  # "" (ukendt) | "waiting" (0 A) | "switch" (16 A + kontakt)
+    sw_want: str = ""  # "on"/"off" — hvad kontakten skal opnå
+    sw_attempts: int = 0  # kommandoer sendt for sw_want
+    sw_last_iso: str = ""  # seneste kontakt-kommando
+
     def to_dict(self) -> dict:
         return asdict(self)
 

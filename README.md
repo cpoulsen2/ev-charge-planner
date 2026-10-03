@@ -21,19 +21,21 @@ elpriser (Strømligning) og styrer en Zaptec-ladeboks.
 - **Ladetid til mål** — sensor der viser hvor lang tid der kræves for at nå målet.
 - **Køretøjsstyring i UI** — ingen standard-biler, kun **Guest** indbygget; tilføj selv biler
   med kapacitet og valgfri SoC-sensor.
-- **Styring via strømgrænse** — laderen styres kun med installationens strøm (fx
-  `number.zag089363_available_current`): ladestrøm (standard 16 A) i ladeslots og ved
-  "Lad straks", ellers 0 A. Sætter man stikket i uden for et slot, lader bilen ikke.
-  Kaldet til Zaptec gentages med stigende pauser, til laderen melder den ønskede værdi,
-  og der er aldrig to kald i gang samtidig. Planlagte ændringer følger Zaptecs anbefaling
-  om højst én ændring pr. 15 min; brugerhandlinger (Stop, Lad straks) sker med det samme.
-- **Følger Zaptecs anbefalinger for MaxCurrent** — strømmen sendes kun, når der er en
-  session (bil sat i), og sendes igen ~20 s efter isætning, fordi laderen læser værdien
-  ved sessionsstart. En værdi regnes først som sat, når både indstillingen og
-  ChargeCurrentSet (`sensor.<lader>_allocated_charge_current`) passer, og der ikke lader
-  strøm ved 0 A. Er laderen offline, står det i status.
-- **Slås integrationen fra eller slettes**, sættes strømmen tilbage til ladestrømmen, så
-  laderen virker som en almindelig lader igen.
+- **Sessionsstyring af Zaptec-laderen**:
+  1. Når kablet tages ud, sættes laderens max current (`number.<lader>_charger_max_current`,
+     findes automatisk) til **0 A**, så næste bil ikke begynder at lade ved isætning.
+  2. Fra isætning til **første ladeslot** står den på 0 A.
+  3. Ved første ladeslot (eller "Lad straks") sættes max current til ladestrømmen
+     (standard **16 A**) — én gang.
+  4. **Resten af sessionen** styres udelukkende med ladekontakten
+     (`switch.<lader>_charging`): pause uden for slots, genoptag i slots. Max current
+     røres ikke, før kablet tages ud.
+
+  Alle kald til Zaptec gentages med stigende pauser, til laderen melder det ønskede
+  resultat, og der er aldrig to kald i gang samtidig. Status viser fasen
+  (`session_phase`), max current og hvad laderen gør.
+- **Slås integrationen fra eller slettes**, sættes max current tilbage til ladestrømmen og
+  en pauset lader genoptages, så den virker som en almindelig lader igen.
 - **Robust over for genstart** — planen og strømstyringens tilstand gemmes, så Home
   Assistant kan genstarte midt i en ladning.
 - **Observatør-tilstand** — beregn og log alt uden at røre laderen (til indkøring).

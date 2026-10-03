@@ -217,6 +217,13 @@ def _restore_normal_current(hass: "HomeAssistant", entry: "ConfigEntry") -> None
             "number", "set_value", {"entity_id": entity, "value": float(amps)}
         )
     )
+    # Pauset via ladekontakten → genoptag, så laderen opfører sig normalt igen
+    switch = guards.charger_entity(entry.data.get(CONF_CHARGER_MODE_SENSOR), "switch", "charging")
+    sw = hass.states.get(switch) if switch else None
+    if sw is not None and sw.state == "off":
+        hass.async_create_task(
+            hass.services.async_call("switch", "turn_on", {"entity_id": switch})
+        )
 
 
 async def async_unload_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool:

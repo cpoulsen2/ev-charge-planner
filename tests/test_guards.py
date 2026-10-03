@@ -202,3 +202,50 @@ def test_not_applied_when_charging_but_should_be_off():
 
 def test_unknown_charge_current_set_is_ignored():
     assert _ap(charge_current_set=None) == (True, "")
+
+
+# ---------- switch_action (ladekontakten i en igangværende session) ----------
+
+
+def _sw(**kw):
+    from custom_components.ev_charge_planner.guards import switch_action
+
+    d = dict(
+        want_charge=True,
+        charging=False,
+        switch_state="off",
+        inflight=False,
+        attempts=0,
+        last_cmd_ms=None,
+        now_ms=T,
+        confirm_ms=60 * S,
+        retry_ms=(2 * MIN, 5 * MIN, 10 * MIN),
+    )
+    d.update(kw)
+    return switch_action(**d)
+
+
+def test_switch_resumes_when_paused_and_should_charge():
+    assert _sw() == ("turn_on", 0)
+
+
+def test_switch_pauses_when_charging_and_should_not():
+    assert _sw(want_charge=False, charging=True, switch_state="on") == ("turn_off", 0)
+
+
+def test_switch_nothing_when_state_matches():
+    assert _sw(charging=True, switch_state="on")[0] == "none"
+    assert _sw(want_charge=False, charging=False, switch_state="off")[0] == "none"
+
+
+def test_switch_waits_when_command_not_valid():
+    # bilen er selv holdt op (ikke pauset) → resume ugyldig → kontakten utilgængelig
+    assert _sw(switch_state="unavailable")[0] == "wait"
+    assert _sw(want_charge=False, charging=True, switch_state="unavailable")[0] == "wait"
+
+
+def test_switch_never_while_inflight_and_backs_off():
+    assert _sw(inflight=True)[0] == "wait"
+    assert _sw(attempts=1, last_cmd_ms=T - 30 * S) == ("wait", 30 * S)
+    assert _sw(attempts=1, last_cmd_ms=T - 60 * S) == ("turn_on", 0)
+    assert _sw(attempts=2, last_cmd_ms=T - MIN) == ("wait", MIN)

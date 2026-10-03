@@ -85,6 +85,8 @@ class StatusSensor(EvcpEntity, SensorEntity):
             "desired_current": d.desired_current,
             "actual_current": d.actual_current,
             "charge_current_set": d.charge_current_set,
+            "max_current_target": d.max_current_target,
+            "session_phase": self.runtime.session_phase,
             "current_note": d.current_note,
             "prices_until": (
                 dt_util.utc_from_timestamp(self.coordinator.prices_until_ms / 1000).isoformat()

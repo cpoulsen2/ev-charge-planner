@@ -114,6 +114,47 @@ def current_action(
     return (CURRENT_WAIT, earliest - now_ms)
 
 
+SWITCH_NONE = "none"
+SWITCH_ON = "turn_on"
+SWITCH_OFF = "turn_off"
+SWITCH_WAIT = "wait"
+
+
+def switch_action(
+    *,
+    want_charge: bool,
+    charging: bool,
+    switch_state: str | None,
+    inflight: bool,
+    attempts: int,
+    last_cmd_ms: int | None,
+    now_ms: int,
+    confirm_ms: int,
+    retry_ms: tuple[int, ...],
+) -> tuple[str, int]:
+    """Styring af en igangværende session med Zaptecs ladekontakt.
+
+    Kontakten er "on" når laderen lader og kun tilgængelig, når kommandoen er
+    gyldig: slå fra (stop_charging_final) når den lader, slå til (resume_charging)
+    kun når den er pauset. Er den utilgængelig, kan der ikke gøres noget nu (fx bilen
+    er selv holdt op, eller laderen venter). Gentagelser får stigende pauser.
+    Returnerer ``(handling, ventetid_ms)``.
+    """
+    if want_charge == charging:
+        return (SWITCH_NONE, 0)
+    if inflight:
+        return (SWITCH_WAIT, 0)
+    if want_charge and switch_state != "off":
+        return (SWITCH_WAIT, 0)
+    if not want_charge and switch_state != "on":
+        return (SWITCH_WAIT, 0)
+    if attempts > 0 and last_cmd_ms is not None:
+        delay = confirm_ms if attempts == 1 else retry_ms[min(attempts - 2, len(retry_ms) - 1)]
+        if now_ms < last_cmd_ms + delay:
+            return (SWITCH_WAIT, last_cmd_ms + delay - now_ms)
+    return (SWITCH_ON if want_charge else SWITCH_OFF, 0)
+
+
 def start_failure_state(
     *,
     should_be_charging: bool,
