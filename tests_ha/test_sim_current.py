@@ -452,16 +452,36 @@ def _is_next_7(dep_iso: str, now: datetime) -> bool:
     )
 
 
-async def test_plugin_sets_departure_to_next_7(sim):
+async def test_manual_departure_holds_until_unplug_then_7(sim):
+    """Brugerens forløb: sæt i morgen kl. 17 + aktivér; kabel ud → næste kl. 07."""
     c, zap, clock, tick, *_ = sim
-    c.runtime.departure_iso = S(30 * 3600).isoformat()  # brugerens gamle valg
+    manual = S(36 * 3600).isoformat()  # "i morgen kl. 17"
+    c.runtime.departure_iso = manual
+    c.runtime.enabled = True
+    for sec in (-1000, 0, 600, 3600):
+        await tick(S(sec))
+        assert c.runtime.departure_iso == manual, "manuelt valg røres ikke"
+    zap.plugged = False
+    zap.publish()
+    await tick(S(4000))
+    assert _is_next_7(c.runtime.departure_iso, S(4000)), "kabel ud → næste kl. 07"
+    zap.plugged = True
+    zap.publish()
+    await tick(S(4100))
+    assert _is_next_7(c.runtime.departure_iso, S(4100))
+
+
+async def test_manual_departure_set_before_plugin_survives(sim):
+    c, zap, clock, tick, *_ = sim
     zap.plugged = False
     zap.publish()
     await tick(S(-900))
+    manual = S(30 * 3600).isoformat()
+    c.runtime.departure_iso = manual  # valgt mens bilen ikke er sat i
     zap.plugged = True
     zap.publish()
     await tick(S(-800))
-    assert _is_next_7(c.runtime.departure_iso, S(-800))
+    assert c.runtime.departure_iso == manual
 
 
 async def test_passed_departure_rolls_to_next_morning(sim):

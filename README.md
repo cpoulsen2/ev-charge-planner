@@ -9,9 +9,10 @@ elpriser (Strømligning) og styrer en Zaptec-ladeboks.
 ## Funktioner
 
 - **Sliding-window prisoptimering** — vælger de billigste 15-min-slots inden deadline.
-- **Klar til afgang** — bilen lades, så den er klar til afrejsetiden. Når en bil
-  tilsluttes, sættes afgangen til næste kl. 07:00; den kan ændres bagefter. Bliver bilen
-  siddende, gælder næste morgen kl. 07:00.
+- **Klar til afgang** — bilen lades, så den er klar til afrejsetiden (standard: næste
+  kl. 07:00). Du kan selv vælge et andet tidspunkt, fx i morgen kl. 17; det gælder, til
+  bilen tages ud. Når stikket tages ud, går afgangen tilbage til næste kl. 07:00. Er
+  afgangstiden passeret, mens bilen sidder i, gælder næste morgen kl. 07:00.
 - **Ladevindue (tidligst start)** — du kan sætte et tidligst-start-tidspunkt, så
   planlæggeren kun vælger slots i vinduet `[tidligst start → afrejse]`. Slås til/fra med en
   kontakt; er den fra, bruges hele tiden frem til afrejse (som før).

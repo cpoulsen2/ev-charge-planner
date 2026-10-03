@@ -335,7 +335,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         return nxt
 
     def reset_departure(self) -> None:
-        """Ny tilslutning: afgang = næste kl. 07:00 (kan ændres bagefter)."""
+        """Afgang = næste kl. 07:00 (sættes ved kabel ud; kan ændres når som helst)."""
         self.runtime.departure_iso = self._next_default_departure().isoformat()
 
     def maintain_departure(self) -> bool:
@@ -1080,6 +1080,10 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         rt.enabled = False
         rt.start_wait_since_iso = ""
         rt.start_failed_notified = False
+        # Kabel ud → et manuelt valgt afgangstidspunkt gælder ikke længere: næste
+        # tilslutning lader til næste kl. 07:00, medmindre brugeren selv ændrer det
+        # (også før stikket sættes i — derfor nulstilles her og ikke ved isætning).
+        self.reset_departure()
         self._set_plan(None)
         await self.async_save()
 
@@ -1113,7 +1117,6 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             rt.enabled = False
             rt.start_wait_since_iso = ""
             rt.start_failed_notified = False
-            self.reset_departure()
             self._set_plan(None)
             self._notify(
                 "🔌 Bil tilsluttet",
