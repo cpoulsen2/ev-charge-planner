@@ -1287,6 +1287,9 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         # Kabel ud → max current 0 A, så næste bil ikke starter; ny session venter
         # på første ladeslot, før der lades.
         rt.session_phase = "waiting"
+        # Kabel ud er en handling fra brugeren: 0 A sendes straks (ikke efter
+        # 15-minutters-reglen), så en ny bil ikke når at starte.
+        self.mark_urgent()
         rt.sw_want = ""
         rt.sw_attempts = 0
         rt.sw_last_iso = ""
