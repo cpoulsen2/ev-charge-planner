@@ -564,7 +564,9 @@ async def test_unplug_sets_0a_and_next_car_does_not_start(sim):
     d = await tick(S(400))
     assert zap.mode == REQ and d.charge_power == 0, "næste bil starter ikke"
     await tick(S(421))
-    assert zap.writes == [16.0, 0.0, 0.0], "0 A sendes igen, når sessionen findes"
+    assert zap.writes == [16.0, 0.0], "højst ét kald pr. 15 min"
+    await tick(S(300 + 901))
+    assert zap.writes == [16.0, 0.0, 0.0], "0 A sendes igen efter isætning"
     assert zap.cmds == []
 
 
@@ -596,15 +598,14 @@ async def test_max_current_not_touched_even_if_changed_during_session(sim):
 async def test_first_slot_write_fails_then_recovers(sim):
     """Natten til 2/10: Zaptec svarer ikke — planneren bliver ved."""
     c, zap, _, tick, *_ = sim
-    zap.fail_next = 2
+    zap.fail_next = 1
     await tick(S(0))
     assert zap.writes == [16.0] and zap.current == 0
-    await tick(S(30))
-    assert len(zap.writes) == 1, "venter 60 s"
-    await tick(S(61))
-    assert len(zap.writes) == 2  # fejler igen
-    await tick(S(61 + 121))
-    assert len(zap.writes) == 3 and zap.current == 16 and zap.mode == CHG
+    for sec in (61, 300, 899):
+        await tick(S(sec))
+        assert len(zap.writes) == 1, "højst ét kald pr. 15 min (Zaptec)"
+    await tick(S(901))
+    assert len(zap.writes) == 2 and zap.current == 16 and zap.mode == CHG
     assert zap.max_concurrent == 1
 
 
@@ -628,9 +629,10 @@ async def test_switch_command_fails_then_retries_with_backoff(sim):
     zap.switch_fail_next = 1
     await tick(S(1800))
     assert zap.cmds == ["off"] and zap.mode == CHG  # fejlede
-    await tick(S(1830))
-    assert zap.cmds == ["off"], "venter 60 s"
-    await tick(S(1861))
+    for sec in (1861, 2200, 2699):
+        await tick(S(sec))
+        assert zap.cmds == ["off"], "højst én kommando pr. 15 min"
+    await tick(S(1800 + 901))
     assert zap.cmds == ["off", "off"] and zap.mode == FIN
 
 
@@ -754,3 +756,30 @@ async def test_never_two_switch_commands_at_once(sim):
     await c.hass.async_block_till_done()
     await tick(S(2500))
     assert zap.mode == FIN and zap.cmds == ["off"]
+
+
+async def test_planned_change_waits_15_min_after_last_change(sim):
+    c, zap, _, tick, *_ = sim
+    zap.current = 16.0
+    zap.publish()
+    c.runtime.session_phase = "waiting"
+    await tick(S(-300))
+    assert zap.writes == [0.0]
+    await tick(S(0))  # første slot 5 min efter sidste ændring
+    assert zap.writes == [0.0], "venter til 15 min efter sidste ændring"
+    await tick(S(601))
+    assert zap.writes == [0.0, 16.0] and zap.mode == CHG
+
+
+async def test_user_action_bypasses_15_min(sim):
+    c, zap, clock, tick, *_ = sim
+    zap.current = 16.0
+    zap.publish()
+    c.runtime.session_phase = "waiting"
+    await tick(S(-1000))
+    assert zap.writes == [0.0]
+    clock.t = S(-900)
+    c.runtime.force_charge = True
+    c.on_user_restart()  # "Lad straks" 100 s efter
+    await tick(S(-900))
+    assert zap.writes == [0.0, 16.0] and zap.mode == CHG

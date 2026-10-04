@@ -131,6 +131,7 @@ def switch_action(
     now_ms: int,
     confirm_ms: int,
     retry_ms: tuple[int, ...],
+    urgent: bool = False,
 ) -> tuple[str, int]:
     """Styring af en igangværende session med Zaptecs ladekontakt.
 
@@ -148,7 +149,7 @@ def switch_action(
         return (SWITCH_WAIT, 0)
     if not want_charge and switch_state != "on":
         return (SWITCH_WAIT, 0)
-    if attempts > 0 and last_cmd_ms is not None:
+    if attempts > 0 and last_cmd_ms is not None and not urgent:
         delay = confirm_ms if attempts == 1 else retry_ms[min(attempts - 2, len(retry_ms) - 1)]
         if now_ms < last_cmd_ms + delay:
             return (SWITCH_WAIT, last_cmd_ms + delay - now_ms)

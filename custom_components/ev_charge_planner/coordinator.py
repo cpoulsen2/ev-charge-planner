@@ -50,7 +50,6 @@ from .const import (
     CONF_VEHICLES,
     CURRENT_CONFIRM_DELAY,
     CURRENT_MIN_CHANGE_INTERVAL,
-    CURRENT_RETRY_DELAYS,
     DEFAULT_CHARGE_CURRENT,
     DEFAULT_DEPARTURE_HOUR,
     EVENT_ACTION,
@@ -955,10 +954,12 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             attempts=rt.cur_attempts,
             last_write_ms=iso_ms(rt.cur_last_write_iso),
             last_change_ms=iso_ms(rt.cur_change_iso),
-            urgent=True,  # max current ændres kun ved kabel ud og første slot
+            # Zaptec: højst én ændring pr. 15 min — også gentagelser. Kun brugerens egne
+            # handlinger (Stop, Lad straks, automatik til, bilvalg) sker med det samme.
+            urgent=self._user_urgent(now),
             now_ms=planner.to_ms(now),
-            confirm_ms=int(CURRENT_CONFIRM_DELAY.total_seconds() * 1000),
-            retry_ms=tuple(int(d.total_seconds() * 1000) for d in CURRENT_RETRY_DELAYS),
+            confirm_ms=self._min_interval_ms(),
+            retry_ms=(self._min_interval_ms(),),
             min_change_interval_ms=int(CURRENT_MIN_CHANGE_INTERVAL.total_seconds() * 1000),
         )
         if action == guards.CURRENT_WRITE:
@@ -1004,8 +1005,9 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             attempts=rt.sw_attempts,
             last_cmd_ms=planner.to_ms(rt.sw_last_iso) if rt.sw_last_iso else None,
             now_ms=planner.to_ms(now),
-            confirm_ms=int(CURRENT_CONFIRM_DELAY.total_seconds() * 1000),
-            retry_ms=tuple(int(d.total_seconds() * 1000) for d in CURRENT_RETRY_DELAYS),
+            confirm_ms=self._min_interval_ms(),
+            retry_ms=(self._min_interval_ms(),),
+            urgent=self._user_urgent(now),
         )
         amps = f"{decision.max_current_target:.0f} A"
         if action in (guards.SWITCH_ON, guards.SWITCH_OFF):
@@ -1074,6 +1076,13 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         if self._get_state(self._charger_entity("binary_sensor", "online")) == "off":
             note = "Laderen er offline — " + note
         return note
+
+    @staticmethod
+    def _min_interval_ms() -> int:
+        return int(CURRENT_MIN_CHANGE_INTERVAL.total_seconds() * 1000)
+
+    def _user_urgent(self, now: datetime) -> bool:
+        return self._urgent_until is not None and now < self._urgent_until
 
     def _charger_entity(self, domain: str, suffix: str) -> str | None:
         """Zaptec-entitet for samme lader (fx sensor.<lader>_allocated_charge_current)."""

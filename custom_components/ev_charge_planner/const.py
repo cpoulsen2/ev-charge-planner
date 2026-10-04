@@ -36,13 +36,9 @@ CAR_SIDE_STOP_TICKS = 4  # antal minutter med 0 W efter ladning før "bilen stop
 
 # --- Strømstyring (laderen styres KUN via en strømgrænse: X A eller 0 A) ---
 DEFAULT_CHARGE_CURRENT = 16  # A i ladeslots / "Lad straks"
-CURRENT_CONFIRM_DELAY = timedelta(seconds=60)  # vent på at Zaptec melder ny værdi før genforsøg
-CURRENT_RETRY_DELAYS = (  # derefter: genforsøg med stigende pause
-    timedelta(minutes=2),
-    timedelta(minutes=5),
-    timedelta(minutes=10),
-)
-CURRENT_MIN_CHANGE_INTERVAL = timedelta(minutes=15)  # Zaptec: højst én ændring pr. 15 min
+CURRENT_CONFIRM_DELAY = timedelta(seconds=60)  # tjek laderens svar så længe efter et kald
+# Zaptec: højst én ændring pr. 15 min — gælder ALLE kald til laderen, også gentagelser
+CURRENT_MIN_CHANGE_INTERVAL = timedelta(minutes=15)
 USER_ACTION_URGENCY = timedelta(minutes=2)  # brugerhandling må ændre strømmen med det samme
 SESSION_SETTLE = timedelta(seconds=20)  # efter isætning: send strømmen igen
 START_FAILED_TIMEOUT = timedelta(minutes=5)  # notificér hvis der ikke lades så længe i et slot
