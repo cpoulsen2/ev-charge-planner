@@ -57,6 +57,7 @@ from .const import (
     NOTIFY_CLICK_PATH,
     NOTIFY_DEFAULTS,
     GUEST_VEHICLE,
+    PAUSE_SETTLE,
     SLOW_CALL_WARNING,
     START_FAILED_TIMEOUT,
     UPDATE_INTERVAL,
@@ -122,6 +123,8 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         # kald i op til ~100 s, så der sendes aldrig et nyt mens det kører.
         self._write_inflight = False
         self._cmd_inflight = False  # pause/genoptag-kommando i gang
+        # Hvornår laderen gik ind i sin nuværende tilstand (None = ukendt/længe siden)
+        self._mode_since: datetime | None = None
         self._cmd_last_error = ""
         self._max_ok = False  # max-strøm bekræftet på ladestrømmen (røres så ikke igen)
         # Brugerhandling (Stop, Lad straks, automatik til, bilvalg …) må ændre
@@ -571,6 +574,7 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         await self._handle_mode_transition(self._prev_charger_mode, mode)
         if mode != self._prev_charger_mode:
             self._prev_charger_mode = mode
+            self._mode_since = dt_util.utcnow()
             rt.prev_charger_mode = mode  # persistér så genstart kender sidste mode
             await self.async_save()
 
@@ -935,6 +939,20 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             retry_ms=tuple(int(d.total_seconds() * 1000) for d in COMMAND_RETRY_DELAYS),
             urgent=self._user_urgent(now) and rt.cmd_attempts == 0,
         )
+        # Bilen og laderen forhandler stadig (lige efter isætning/genoptag): en pause nu
+        # bliver tilsidesat. Vent til laderen lader, eller requesting har stået stille.
+        if (
+            action == guards.CMD_PAUSE
+            and mode == CM_REQUESTING
+            and self._mode_since is not None
+            and now - self._mode_since < PAUSE_SETTLE
+        ):
+            left = (self._mode_since + PAUSE_SETTLE - now).total_seconds()
+            self._wake_in(left + 1)
+            decision.current_note = (
+                f"Bil tilsluttet — pauser om {left:.0f} s (bilen forhandler med laderen)"
+            )
+            return
         if action in (guards.CMD_PAUSE, guards.CMD_RESUME):
             rt.cmd_attempts += 1
             rt.cmd_last_iso = now.isoformat()

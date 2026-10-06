@@ -45,6 +45,11 @@ COMMAND_RETRY_DELAYS = (  # pause/genoptag: gentag efter 1 min, derefter 2, 5, 1
     timedelta(minutes=5),
     timedelta(minutes=10),
 )
+# Lige efter isætning forhandler bilen og laderen (connected_requesting). En pause sendt
+# midt i det bliver tilsidesat, når laderen alligevel går i gang ~1 s senere. Derfor
+# pauses først, når laderen lader (forhandlingen er færdig) eller requesting har stået
+# uændret så længe (bilen sover).
+PAUSE_SETTLE = timedelta(seconds=15)
 START_FAILED_TIMEOUT = timedelta(minutes=5)  # notificér hvis der ikke lades så længe i et slot
 SLOW_CALL_WARNING = timedelta(seconds=10)  # Zaptec-kald længere end dette logges som advarsel
 

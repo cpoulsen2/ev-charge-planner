@@ -71,6 +71,10 @@ class Zaptec:
         self.car = "draws"  # "draws" | "asleep" (requesting) | "full" (finished, ikke pauset)
         self.current = 16.0  # max-strøm
         self.paused = False  # FinalStopActive
+        # Lige efter isætning forhandler bil og lader (requesting); en pause sendt dér
+        # bliver tilsidesat, når laderen går i gang ~1 s senere.
+        self.negotiating = False
+        self.paused_while_negotiating = False
         self.writes: list[float] = []
         self.cmds: list[str] = []  # "stop"/"resume"
         self.fail_next = 0
@@ -89,6 +93,8 @@ class Zaptec:
             return DISC
         if self.paused:
             return FIN
+        if self.negotiating:
+            return REQ
         if self.current < 6:
             return REQ
         return {"draws": CHG, "asleep": REQ, "full": FIN}[self.car]
@@ -117,6 +123,16 @@ class Zaptec:
 
     def plug(self) -> None:
         self.plugged = True
+        self.negotiating = self.car == "draws"
+        self.publish()
+
+    def finish_negotiation(self) -> None:
+        """Bilen er færdig med at forhandle: laderen går i gang — også hvis den blev
+        pauset under forhandlingen (det observerede problem)."""
+        self.negotiating = False
+        if self.paused_while_negotiating:
+            self.paused = False
+            self.paused_while_negotiating = False
         self.publish()
 
     async def set_value(self, call) -> None:
@@ -143,6 +159,8 @@ class Zaptec:
             if not self.stop_valid:
                 raise HomeAssistantError("stop not valid")
             self.paused = True
+            if self.negotiating:
+                self.paused_while_negotiating = True
         else:
             if not self.resume_valid:
                 raise HomeAssistantError("resume not valid")
@@ -536,20 +554,29 @@ async def test_paused_until_slot_then_resume_and_pause(sim):
     assert zap.writes == [], "max-strømmen røres aldrig"
 
 
-async def test_plugin_pauses_immediately(sim):
+async def test_plugin_waits_for_negotiation_then_pauses(sim):
+    """Pausen sendes ikke midt i forhandlingen — den ville blive tilsidesat."""
     c, zap, _, tick, *_ = sim
     zap.unplug()
     await tick(S(-900))
     assert c.runtime.active_vehicle == CHOOSE_VEHICLE
-    zap.plug()  # 16 A, ingen autorisation → laderen begynder selv
+    zap.plug()  # requesting: bil og lader forhandler
+    assert zap.mode == REQ
+    d = await tick(S(-899.98))
+    assert zap.cmds == [], "ingen pause midt i forhandlingen"
+    assert "forhandler" in d.current_note
+    zap.finish_negotiation()  # laderen går i gang
     assert zap.mode == CHG
-    await tick(S(-895))
-    assert zap.cmds == ["stop"] and zap.paused, "pause med det samme ved isætning"
+    await tick(S(-898))
+    assert zap.cmds == ["stop"] and zap.paused, "pause når forhandlingen er færdig"
+    zap.publish()
+    await tick(S(-880))
+    assert zap.cmds == ["stop"] and zap.paused, "pausen holder"
     assert zap.writes == []
 
 
-async def test_plugin_while_car_asleep_is_paused_too(sim):
-    """requesting (bilen beder ikke om strøm endnu) må ikke stå upauset."""
+async def test_plugin_while_car_asleep_is_paused_after_settle(sim):
+    """requesting uden forhandling (bilen sover) pauses, når den har stået stille 15 s."""
     c, zap, _, tick, *_ = sim
     zap.unplug()
     await tick(S(-900))
@@ -557,6 +584,8 @@ async def test_plugin_while_car_asleep_is_paused_too(sim):
     zap.plug()
     assert zap.mode == REQ
     await tick(S(-895))
+    assert zap.cmds == [], "venter 15 s"
+    await tick(S(-879))
     assert zap.cmds == ["stop"] and zap.paused
 
 
