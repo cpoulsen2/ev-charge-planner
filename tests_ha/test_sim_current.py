@@ -1,8 +1,7 @@
-"""End-to-end simulation af sessionsstyringen mod en falsk Zaptec-lader (rigtig HA-kerne).
+"""End-to-end simulation af laderstyringen mod en falsk Zaptec Go (rigtig HA-kerne).
 
-Max current 0 A fra kabel ud til første ladeslot, derefter 16 A én gang, og resten af
-sessionen styres med ladekontakten (pause/genoptag). Kald kan hænge, fejle eller blive
-meldt tilbage forsinket.
+Max-strømmen står fast på 16 A; ladningen styres med pause (stop_charging_final) og
+genoptag (resume_charging). Kald kan hænge eller fejle.
 """
 
 from __future__ import annotations
@@ -28,9 +27,9 @@ POWER = "sensor.zag_charge_power"
 ENERGY = "sensor.zag_session_energy"
 CUR = "number.zag089363_available_current"
 SOC = "sensor.modely_battery_level"
-CCS = "sensor.zag_allocated_charge_current"  # Zaptec ChargeCurrentSet
 ONLINE = "binary_sensor.zag_online"
-SW = "switch.zag_charging"  # Zaptecs ladekontakt
+STOP = "button.zag_stop_charging"  # stop_charging_final (pause)
+RESUME = "button.zag_resume_charging"  # resume_charging (genoptag)
 
 REQ, CHG, FIN, DISC = (
     "connected_requesting",
@@ -59,62 +58,61 @@ class Clock:
 
 
 class Zaptec:
-    """Falsk Zaptec-lader: max current + ladekontakt (pause/genoptag via FinalStopActive)."""
+    """Falsk Zaptec Go: max-strøm + pause/genoptag (stop_charging_final/resume_charging).
+
+    Gyldighed som i Zaptec-integrationen: resume kun når laderen er pauset
+    (Connected_Finished + FinalStopActive=1), stop ikke når pauset eller frakoblet.
+    Autorisation er slået fra, så en ikke-pauset lader lader, når bilen vil.
+    """
 
     def __init__(self, hass) -> None:
         self.hass = hass
         self.plugged = True
-        self.car_draws = True
-        self.current = 0.0  # max current (indstillingen)
-        self.final_stop = False  # pauset med stop_charging_final
+        self.car = "draws"  # "draws" | "asleep" (requesting) | "full" (finished, ikke pauset)
+        self.current = 16.0  # max-strøm
+        self.paused = False  # FinalStopActive
         self.writes: list[float] = []
-        self.cmds: list[str] = []  # "on"/"off" på ladekontakten
+        self.cmds: list[str] = []  # "stop"/"resume"
         self.fail_next = 0
-        self.switch_fail_next = 0
-        self.switch_gate: asyncio.Event | None = None
+        self.cmd_fail_next = 0
         self.gate: asyncio.Event | None = None
-        self.lag = False
-        self.pending: float | None = None
-        self.concurrent = 0
-        self.max_concurrent = 0
-        # Strøm laderen faktisk bruger (ChargeCurrentSet). None = følger indstillingen;
-        # sat til et tal = laderen har IKKE fået nye værdier (fx offline).
-        self.frozen_ccs: float | None = None
+        self.cmd_gate: asyncio.Event | None = None
         self.online = True
 
     @property
-    def ccs(self) -> float:
-        return self.current if self.frozen_ccs is None else self.frozen_ccs
+    def car_draws(self) -> bool:
+        return self.car == "draws"
 
     @property
     def mode(self) -> str:
         if not self.plugged:
             return DISC
-        if self.ccs < 6:
-            return REQ
-        if self.final_stop:
+        if self.paused:
             return FIN
-        return CHG if self.car_draws else FIN
+        if self.current < 6:
+            return REQ
+        return {"draws": CHG, "asleep": REQ, "full": FIN}[self.car]
 
     @property
-    def switch_state(self) -> str:
-        if self.mode == CHG:
-            return "on"
-        if self.mode == FIN and self.final_stop:
-            return "off"  # pauset → resume er gyldig
-        return "unavailable"
+    def stop_valid(self) -> bool:
+        return self.plugged and not self.paused
+
+    @property
+    def resume_valid(self) -> bool:
+        return self.plugged and self.paused
 
     def publish(self) -> None:
+        if not self.plugged:
+            self.paused = False
         self.hass.states.async_set(MODE, self.mode)
         self.hass.states.async_set(POWER, "11.0" if self.mode == CHG else "0.0")
         self.hass.states.async_set(CUR, str(self.current), {"min": 0, "max": 32})
-        self.hass.states.async_set(CCS, str(self.ccs))
         self.hass.states.async_set(ONLINE, "on" if self.online else "off")
-        self.hass.states.async_set(SW, self.switch_state)
+        self.hass.states.async_set(STOP, "unknown" if self.stop_valid else "unavailable")
+        self.hass.states.async_set(RESUME, "unknown" if self.resume_valid else "unavailable")
 
     def unplug(self) -> None:
         self.plugged = False
-        self.final_stop = False
         self.publish()
 
     def plug(self) -> None:
@@ -122,49 +120,34 @@ class Zaptec:
         self.publish()
 
     async def set_value(self, call) -> None:
-        value = float(call.data["value"])
-        self.writes.append(value)
-        self.concurrent += 1
-        self.max_concurrent = max(self.max_concurrent, self.concurrent)
-        try:
-            if self.gate is not None:
-                await self.gate.wait()
-            if self.fail_next > 0:
-                self.fail_next -= 1
-                raise HomeAssistantError("Set current limit failed (timeout)")
-            if self.lag:
-                self.pending = value
-                return
-            self.current = value
-            self.publish()
-        finally:
-            self.concurrent -= 1
-
-    async def switch_on(self, call) -> None:
-        self.cmds.append("on")
-        if self.switch_fail_next > 0:
-            self.switch_fail_next -= 1
-            raise HomeAssistantError("Resuming charging failed")
-        if self.mode == FIN and self.final_stop:
-            self.final_stop = False
+        self.writes.append(float(call.data["value"]))
+        if self.gate is not None:
+            await self.gate.wait()
+        if self.fail_next > 0:
+            self.fail_next -= 1
+            raise HomeAssistantError("Setting maxChargeCurrent failed")
+        self.current = float(call.data["value"])
         self.publish()
 
-    async def switch_off(self, call) -> None:
-        self.cmds.append("off")
-        if self.switch_gate is not None:
-            await self.switch_gate.wait()
-        if self.switch_fail_next > 0:
-            self.switch_fail_next -= 1
-            raise HomeAssistantError("Stop/pausing charging failed")
-        if self.mode == CHG:
-            self.final_stop = True
+    async def press(self, call) -> None:
+        eid = call.data["entity_id"]
+        eid = eid[0] if isinstance(eid, list) else eid
+        kind = "stop" if eid == STOP else "resume"
+        self.cmds.append(kind)
+        if self.cmd_gate is not None:
+            await self.cmd_gate.wait()
+        if self.cmd_fail_next > 0:
+            self.cmd_fail_next -= 1
+            raise HomeAssistantError(f"Running command '{kind}' failed")
+        if kind == "stop":
+            if not self.stop_valid:
+                raise HomeAssistantError("stop not valid")
+            self.paused = True
+        else:
+            if not self.resume_valid:
+                raise HomeAssistantError("resume not valid")
+            self.paused = False
         self.publish()
-
-    def apply_pending(self) -> None:
-        if self.pending is not None:
-            self.current = self.pending
-            self.pending = None
-            self.publish()
 
 
 @pytest.fixture
@@ -206,12 +189,12 @@ async def sim(hass, monkeypatch):
     )
 
     zap = Zaptec(hass)
+    zap.paused = True  # bilen er sat i og pauset — venter på første ladeslot
     zap.publish()
     hass.states.async_set(ENERGY, "0.0")
     hass.states.async_set(SOC, "58")
     hass.services.async_register("number", "set_value", zap.set_value)
-    hass.services.async_register("switch", "turn_on", zap.switch_on)
-    hass.services.async_register("switch", "turn_off", zap.switch_off)
+    hass.services.async_register("button", "press", zap.press)
 
     entry = _entry()
     entry.add_to_hass(hass)
@@ -230,15 +213,12 @@ async def sim(hass, monkeypatch):
     rt.observer_mode = False
     rt.departure_iso = S(6 * 3600).isoformat()
     rt.target_soc = 80
-    rt.session_phase = "waiting"  # bilen er sat i; 0 A indtil første ladeslot
     c._prev_charger_mode = zap.mode
     c._set_plan(
         PlanResult(
             plan=[
                 PlanBlock(ms(T_SLOT), ms(T_SLOT + timedelta(minutes=30)), 0.4, 5.5, 2.2, 30),
-                PlanBlock(
-                    ms(S(SLOT2)), ms(S(SLOT2 + 15 * 60)), 0.4, 2.75, 1.1, 15
-                ),
+                PlanBlock(ms(S(SLOT2)), ms(S(SLOT2 + 15 * 60)), 0.4, 2.75, 1.1, 15),
             ]
         )
     )
@@ -247,7 +227,7 @@ async def sim(hass, monkeypatch):
     async def tick(at: datetime, coordinator: EvcpCoordinator | None = None):
         clock.t = at
         d = await (coordinator or c)._async_update_data()
-        if zap.gate is None and zap.switch_gate is None:
+        if zap.gate is None and zap.cmd_gate is None:
             await hass.async_block_till_done()
         else:
             for _ in range(5):
@@ -290,7 +270,7 @@ async def test_current_price_sensor_format_without_duplicates(sim, hass):
 async def test_missing_prices_gives_clear_reason(sim, hass):
     c, zap, clock, tick, *_ = sim
     clock.t = S(-3600)
-    zap.car_draws = False  # laderen lader ikke lige nu
+    zap.car = "full"  # laderen lader ikke lige nu
     zap.publish()
     hass.states.async_set("sensor.price", "1.0", {})
     c.runtime.departure_iso = (S(4 * 3600)).isoformat()
@@ -451,7 +431,7 @@ async def test_missing_tomorrow_prices_are_explained(sim, hass):
     c, zap, clock, tick, *_ = sim
     now = S(-3600)
     clock.t = now
-    zap.car_draws = False
+    zap.car = "full"
     zap.publish()
     hass.states.async_set("sensor.price", "2.4", {"prices_today": _quarters(now, 20, 2.4)})
     c.runtime.departure_iso = (now + timedelta(hours=40)).isoformat()
@@ -521,265 +501,223 @@ async def test_charger_max_current_is_used_even_if_other_entity_configured(sim, 
 # ---------- sessionsstyring: 0 A → 16 A ved første slot → ladekontakten ----------
 
 
-async def test_zero_amps_until_first_slot_then_16a(sim):
+# ---------- Charger v2: max-strøm fast på 16 A, pause/genoptag styrer ladningen ----------
+
+
+async def test_max_current_set_to_16_once_and_never_touched(sim):
     c, zap, _, tick, *_ = sim
-    for sec in (-600, -300, -60):
-        d = await tick(S(sec))
-        assert d.charge_power == 0 and zap.mode == REQ
-    assert zap.writes == [] and zap.cmds == []
-    assert "venter på første ladeslot" in d.current_note
+    zap.current = 0.0  # som efter v0.15 (0 A ved kabel ud)
+    zap.publish()
+    await tick(S(-600))
+    assert zap.writes == [16.0]
+    await tick(S(-540))  # laderen melder 16 A → bekræftet
+    zap.current = 10.0  # nogen ændrer den
+    zap.publish()
+    for sec in (-300, 0, 1800, SLOT2):
+        await tick(S(sec))
+    assert zap.writes == [16.0], "max-strømmen røres ikke igen"
+
+
+async def test_paused_until_slot_then_resume_and_pause(sim):
+    c, zap, _, tick, *_ = sim
+    d = await tick(S(-60))
+    assert zap.cmds == [] and zap.mode == FIN and d.paused
+    assert "venter på ladeslot" in d.current_note
     await tick(S(0))
-    assert zap.writes == [16.0] and zap.mode == CHG
-    assert c.runtime.session_phase == "switch"
+    assert zap.cmds == ["resume"] and zap.mode == CHG
     d = await tick(S(60))
-    assert d.action == "charging" and zap.cmds == []
+    assert d.action == "charging" and d.current_note == "Lader"
+    await tick(S(1800))
+    assert zap.cmds == ["resume", "stop"] and zap.paused
+    await tick(S(SLOT2))
+    assert zap.cmds == ["resume", "stop", "resume"] and zap.mode == CHG
+    await tick(S(SLOT2 + 15 * 60))
+    assert zap.cmds[-1] == "stop" and zap.paused
+    assert zap.writes == [], "max-strømmen røres aldrig"
 
 
-async def test_rest_of_session_uses_switch_and_never_touches_max(sim):
+async def test_plugin_pauses_immediately(sim):
     c, zap, _, tick, *_ = sim
-    await tick(S(0))
-    await tick(S(60))
-    await tick(S(1800))  # slot 1 slut → pause med kontakten
-    assert zap.cmds == ["off"] and zap.mode == FIN and zap.final_stop
-    await tick(S(1900))
-    assert zap.cmds == ["off"], "ingen gentagelse når den er pauset"
-    await tick(S(SLOT2))  # slot 2 → genoptag med kontakten
-    assert zap.cmds == ["off", "on"] and zap.mode == CHG
-    await tick(S(SLOT2 + 15 * 60))  # slot 2 slut
-    assert zap.cmds == ["off", "on", "off"]
-    assert zap.writes == [16.0], "max current røres ikke i sessionen"
-    assert c.runtime.active_vehicle == "Model Y" and c.runtime.enabled
-
-
-async def test_unplug_sets_0a_and_next_car_does_not_start(sim):
-    c, zap, _, tick, *_ = sim
-    await tick(S(0))
-    await tick(S(60))
-    assert zap.current == 16
     zap.unplug()
-    await tick(S(300))
-    assert zap.writes == [16.0, 0.0], "kabel ud → 0 A (også uden session)"
-    assert c.runtime.session_phase == "waiting"
+    await tick(S(-900))
+    assert c.runtime.active_vehicle == CHOOSE_VEHICLE
+    zap.plug()  # 16 A, ingen autorisation → laderen begynder selv
+    assert zap.mode == CHG
+    await tick(S(-895))
+    assert zap.cmds == ["stop"] and zap.paused, "pause med det samme ved isætning"
+    assert zap.writes == []
+
+
+async def test_plugin_while_car_asleep_is_paused_too(sim):
+    """requesting (bilen beder ikke om strøm endnu) må ikke stå upauset."""
+    c, zap, _, tick, *_ = sim
+    zap.unplug()
+    await tick(S(-900))
+    zap.car = "asleep"
     zap.plug()
-    d = await tick(S(400))
-    assert zap.mode == REQ and d.charge_power == 0, "næste bil starter ikke"
-    await tick(S(421))
-    assert zap.writes == [16.0, 0.0], "højst ét kald pr. 15 min"
-    await tick(S(300 + 901))
-    assert zap.writes == [16.0, 0.0, 0.0], "0 A sendes igen efter isætning"
-    assert zap.cmds == []
+    assert zap.mode == REQ
+    await tick(S(-895))
+    assert zap.cmds == ["stop"] and zap.paused
 
 
-async def test_lad_straks_sets_16a_and_stop_pauses_with_switch(sim):
+async def test_no_vehicle_chosen_stays_paused_in_slot(sim):
+    c, zap, _, tick, *_ = sim
+    c.runtime.active_vehicle = CHOOSE_VEHICLE
+    for sec in (0, 600, 1200):
+        await tick(S(sec))
+    assert zap.cmds == [] and zap.paused
+
+
+async def test_car_stopped_itself_is_not_resumed(sim):
+    c, zap, _, tick, *_ = sim
+    await tick(S(0))
+    zap.car = "full"  # bilen holder selv op (ikke pauset)
+    zap.publish()
+    for sec in (60, 120, 300):
+        d = await tick(S(sec))
+    assert zap.cmds == ["resume"], "intet nyt — resume er ugyldig dér"
+    assert "selv holdt op" in d.current_note
+
+
+async def test_unplug_does_nothing_to_charger(sim):
+    c, zap, _, tick, *_ = sim
+    await tick(S(0))
+    await tick(S(60))
+    zap.unplug()
+    d = await tick(S(120))
+    assert zap.cmds == ["resume"] and zap.writes == []
+    assert "Ingen bil tilsluttet" in d.current_note
+
+
+async def test_command_fails_retries_1_2_5_10_never_gives_up(sim):
+    c, zap, _, tick, *_ = sim
+    zap.cmd_fail_next = 3
+    await tick(S(0))
+    assert zap.cmds == ["resume"] and zap.paused
+    await tick(S(30))
+    assert len(zap.cmds) == 1, "venter 1 min"
+    await tick(S(61))
+    assert len(zap.cmds) == 2
+    await tick(S(61 + 100))
+    assert len(zap.cmds) == 2, "2 min"
+    await tick(S(61 + 121))
+    assert len(zap.cmds) == 3
+    await tick(S(182 + 299))
+    assert len(zap.cmds) == 3, "5 min"
+    d = await tick(S(182 + 301))
+    assert len(zap.cmds) == 4 and zap.mode == CHG
+    assert d.action in ("start", "charging")
+
+
+async def test_never_two_commands_at_once(sim):
+    c, zap, _, tick, *_ = sim
+    zap.cmd_gate = asyncio.Event()
+    for sec in (0, 61, 300, 900):
+        await tick(S(sec))
+    assert zap.cmds == ["resume"]
+    gate, zap.cmd_gate = zap.cmd_gate, None
+    gate.set()
+    await c.hass.async_block_till_done()
+    d = await tick(S(960))
+    assert zap.mode == CHG and d.action == "charging"
+
+
+async def test_lad_straks_resumes_and_stop_pauses(sim):
     c, zap, clock, tick, *_ = sim
     clock.t = S(-900)
     c.runtime.force_charge = True
     c.on_user_restart()
     await tick(S(-900))
-    assert zap.writes == [16.0] and zap.mode == CHG
-    clock.t = S(-800)
+    assert zap.cmds == ["resume"] and zap.mode == CHG
+    clock.t = S(-880)  # Stop 20 s efter — brugerhandling, ingen ventetid
     await c.async_stop_charging()
     await c.hass.async_block_till_done()
-    assert zap.cmds == ["off"] and zap.mode == FIN
-    assert zap.writes == [16.0], "Stop pauser med kontakten — max current bliver"
-
-
-async def test_max_current_not_touched_even_if_changed_during_session(sim):
-    c, zap, _, tick, *_ = sim
-    await tick(S(0))
-    await tick(S(60))
-    zap.current = 10.0  # nogen ændrer den
-    zap.publish()
-    for sec in (120, 600, 1200):
-        await tick(S(sec))
-    assert zap.writes == [16.0]
-
-
-async def test_first_slot_write_fails_then_recovers(sim):
-    """Natten til 2/10: Zaptec svarer ikke — planneren bliver ved."""
-    c, zap, _, tick, *_ = sim
-    zap.fail_next = 1
-    await tick(S(0))
-    assert zap.writes == [16.0] and zap.current == 0
-    for sec in (61, 300, 899):
-        await tick(S(sec))
-        assert len(zap.writes) == 1, "højst ét kald pr. 15 min (Zaptec)"
-    await tick(S(901))
-    assert len(zap.writes) == 2 and zap.current == 16 and zap.mode == CHG
-    assert zap.max_concurrent == 1
-
-
-async def test_never_two_max_calls_at_once(sim):
-    c, zap, _, tick, *_ = sim
-    zap.gate = asyncio.Event()
-    for sec in (0, 60, 300, 600):
-        await tick(S(sec))
-    assert zap.writes == [16.0]
-    gate, zap.gate = zap.gate, None
-    gate.set()
-    await c.hass.async_block_till_done()
-    d = await tick(S(660))
-    assert zap.current == 16 and d.action == "charging"
-
-
-async def test_switch_command_fails_then_retries_with_backoff(sim):
-    c, zap, _, tick, *_ = sim
-    await tick(S(0))
-    await tick(S(60))
-    zap.switch_fail_next = 1
-    await tick(S(1800))
-    assert zap.cmds == ["off"] and zap.mode == CHG  # fejlede
-    for sec in (1861, 2200, 2699):
-        await tick(S(sec))
-        assert zap.cmds == ["off"], "højst én kommando pr. 15 min"
-    await tick(S(1800 + 901))
-    assert zap.cmds == ["off", "off"] and zap.mode == FIN
-
-
-async def test_switch_unavailable_sends_nothing(sim):
-    """Bilen er selv holdt op (ikke pauset) → resume er ugyldig → ingen kommando."""
-    c, zap, _, tick, *_ = sim
-    await tick(S(0))
-    zap.car_draws = False
-    zap.publish()
-    assert zap.switch_state == "unavailable"
-    for sec in (60, 120, 300):
-        d = await tick(S(sec))
-    assert zap.cmds == []
-    assert "kan ikke genoptages" in d.current_note
-
-
-async def test_upgrade_mid_session_keeps_16a(sim):
-    c, zap, _, tick, *_ = sim
-    zap.current = 16.0
-    zap.publish()
-    c.runtime.session_phase = ""  # ukendt (fx lige opgraderet)
-    await tick(S(60))
-    assert c.runtime.session_phase == "switch"
+    assert zap.cmds == ["resume", "stop"] and zap.paused
     assert zap.writes == []
 
 
-async def test_waiting_phase_charging_at_0a_is_resent(sim):
-    """Indstillingen siger 0 A, men laderen lader alligevel → send 0 A igen."""
-    c, zap, _, tick, *_ = sim
-    await tick(S(-900))
-    zap.frozen_ccs = 16.0
-    zap.publish()
-    c.hass.states.async_set(CCS, "unavailable")  # kun effekten afslører det
-    await tick(S(-800))
-    assert zap.writes == [0.0]
-
-
-async def test_offline_charger_is_reported(sim):
-    c, zap, _, tick, *_ = sim
-    zap.online = False
-    zap.fail_next = 1
-    zap.publish()
-    await tick(S(0))
-    d = await tick(S(30))
-    assert d.current_note.startswith("Laderen er offline")
-
-
 async def test_force_charge_without_vehicle(sim):
-    c, zap, _, tick, *_ = sim
+    c, zap, clock, tick, *_ = sim
+    clock.t = S(-990)
     c.runtime.active_vehicle = CHOOSE_VEHICLE
     c.runtime.force_charge = True
     c.on_user_restart()
     await tick(S(-990))
-    assert zap.current == 16 and zap.mode == CHG
+    assert zap.mode == CHG
+
+
+async def test_restart_mid_slot_sends_nothing(sim):
+    c, zap, _, tick, make, _ = sim
+    await tick(S(0))
+    await tick(S(60))
+    c.async_close()
+    c2 = await make()
+    c2.restore_plan()
+    c2._prev_charger_mode = zap.mode
+    await tick(S(120), c2)
+    assert zap.cmds == ["resume"] and zap.writes == []
+    c2.async_close()
+
+
+async def test_car_asleep_after_resume_notifies_once(sim):
+    c, zap, _, tick, *_ = sim
+    sent = []
+    c._notify = lambda title, msg, ntype: sent.append(msg)
+    zap.car = "asleep"
+    for sec in range(0, 600, 60):
+        await tick(S(sec))
+    assert zap.cmds == ["resume"] and zap.mode == REQ
+    assert len(sent) == 1 and "Sover bilen" in sent[0]
+
+
+async def test_resume_failing_notifies_and_keeps_trying(sim):
+    c, zap, _, tick, *_ = sim
+    sent = []
+    c._notify = lambda title, msg, ntype: sent.append(msg)
+    zap.cmd_fail_next = 99
+    for sec in range(0, 1800, 30):
+        await tick(S(sec))
+    assert len(sent) == 1 and "pause" in sent[0]
+    assert len(zap.cmds) >= 5, "giver aldrig op"
+
+
+async def test_pause_failing_notifies(sim):
+    c, zap, _, tick, *_ = sim
+    sent = []
+    c._notify = lambda title, msg, ntype: sent.append(msg)
+    await tick(S(0))
+    zap.cmd_fail_next = 99
+    for sec in range(1800, 2400, 30):
+        await tick(S(sec))
+    assert zap.mode == CHG
+    assert any("kunne ikke pauses" in m or "lader stadig" in m for m in sent)
 
 
 async def test_observer_never_touches_the_charger(sim):
     c, zap, _, tick, *_ = sim
     c.runtime.observer_mode = True
+    zap.current = 0.0
+    zap.publish()
     for sec in (-600, 0, 60, 1800):
         d = await tick(S(sec))
     assert zap.writes == [] and zap.cmds == []
     assert "Observatør" in d.current_note
 
 
-async def test_restart_mid_session_does_not_rewrite(sim):
-    c, zap, _, tick, make, _ = sim
-    await tick(S(0))
-    await tick(S(60))
-    c.async_close()
-    c2 = await make()
-    c2.restore_plan()  # som async_setup_entry gør ved opstart
-    c2._prev_charger_mode = zap.mode
-    await tick(S(120), c2)
-    assert zap.writes == [16.0] and zap.cmds == []
-    c2.async_close()
-
-
-async def test_car_not_drawing_notifies_once(sim):
-    c, zap, _, tick, *_ = sim
-    sent = []
-    c._notify = lambda title, msg, ntype: sent.append(msg)
-    zap.car_draws = False
-    for sec in range(0, 600, 60):
-        await tick(S(sec))
-    assert zap.current == 16
-    assert len(sent) == 1 and "trækker ikke strøm" in sent[0]
-
-
-async def test_disable_restores_16a_and_resumes(sim, hass):
+async def test_disable_resumes_paused_charger(sim, hass):
     c, zap, _, tick, *_ = sim
     entry = c.entry
-    await tick(S(0))
-    await tick(S(60))
-    await tick(S(1800))  # pauset med kontakten
-    assert zap.mode == FIN
+    await tick(S(-60))
+    assert zap.paused
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = c
     await integration.async_unload_entry(hass, entry)  # genindlæsning: rør intet
     await hass.async_block_till_done()
-    assert zap.mode == FIN and zap.cmds == ["off"]
+    assert zap.paused and zap.cmds == []
 
     c2 = EvcpCoordinator(hass, entry, c.store)
     hass.data[DOMAIN][entry.entry_id] = c2
     object.__setattr__(entry, "disabled_by", ConfigEntryDisabler.USER)
     await integration.async_unload_entry(hass, entry)
     await hass.async_block_till_done()
-    assert zap.current == 16 and zap.mode == CHG, "slået fra → normal lader igen"
-
-
-async def test_never_two_switch_commands_at_once(sim):
-    c, zap, _, tick, *_ = sim
-    await tick(S(0))
-    await tick(S(60))
-    zap.switch_gate = asyncio.Event()  # Zaptec svarer ikke på pause-kommandoen
-    for sec in (1800, 1861, 2000, 2400):
-        await tick(S(sec))
-    assert zap.cmds == ["off"], "kun én kommando mens den hænger"
-    gate, zap.switch_gate = zap.switch_gate, None
-    gate.set()
-    await c.hass.async_block_till_done()
-    await tick(S(2500))
-    assert zap.mode == FIN and zap.cmds == ["off"]
-
-
-async def test_planned_change_waits_15_min_after_last_change(sim):
-    c, zap, _, tick, *_ = sim
-    zap.current = 16.0
-    zap.publish()
-    c.runtime.session_phase = "waiting"
-    await tick(S(-300))
-    assert zap.writes == [0.0]
-    await tick(S(0))  # første slot 5 min efter sidste ændring
-    assert zap.writes == [0.0], "venter til 15 min efter sidste ændring"
-    await tick(S(601))
-    assert zap.writes == [0.0, 16.0] and zap.mode == CHG
-
-
-async def test_user_action_bypasses_15_min(sim):
-    c, zap, clock, tick, *_ = sim
-    zap.current = 16.0
-    zap.publish()
-    c.runtime.session_phase = "waiting"
-    await tick(S(-1000))
-    assert zap.writes == [0.0]
-    clock.t = S(-900)
-    c.runtime.force_charge = True
-    c.on_user_restart()  # "Lad straks" 100 s efter
-    await tick(S(-900))
-    assert zap.writes == [0.0, 16.0] and zap.mode == CHG
+    assert not zap.paused and zap.mode == CHG, "slået fra → normal lader igen"

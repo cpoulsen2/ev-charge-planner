@@ -9,7 +9,6 @@ from custom_components.ev_charge_planner.guards import (
     charger_entity,
     charger_max_current_entity,
     current_action,
-    current_applied,
     start_failure_state,
 )
 
@@ -168,52 +167,16 @@ def test_charger_entity_variants():
     assert charger_entity(mode, "binary_sensor", "online") == "binary_sensor.zag089363_online"
 
 
-# ---------- current_applied (Zaptec: MaxCurrent OG ChargeCurrentSet) ----------
+# ---------- pause_action (pause/genoptag; max-strøm står fast) ----------
 
 
-def _ap(**kw):
-    d = dict(desired=16.0, setting=16.0, charge_current_set=16.0, power_flowing=True)
-    d.update(kw)
-    return current_applied(**d)
-
-
-def test_applied_when_setting_and_charger_agree():
-    assert _ap() == (True, "")
-    assert _ap(desired=0.0, setting=0.0, charge_current_set=0.0, power_flowing=False) == (
-        True,
-        "",
-    )
-
-
-def test_not_applied_when_setting_differs():
-    assert _ap(setting=0.0)[0] is False
-    assert _ap(setting=None)[0] is False
-
-
-def test_not_applied_when_charger_uses_other_current():
-    ok, why = _ap(charge_current_set=0.0)
-    assert not ok and "0 A" in why
-
-
-def test_not_applied_when_charging_but_should_be_off():
-    ok, why = _ap(desired=0.0, setting=0.0, charge_current_set=None, power_flowing=True)
-    assert not ok and "lader stadig" in why
-
-
-def test_unknown_charge_current_set_is_ignored():
-    assert _ap(charge_current_set=None) == (True, "")
-
-
-# ---------- switch_action (ladekontakten i en igangværende session) ----------
-
-
-def _sw(**kw):
-    from custom_components.ev_charge_planner.guards import switch_action
+def _pa(**kw):
+    from custom_components.ev_charge_planner.guards import pause_action
 
     d = dict(
         want_charge=True,
-        charging=False,
-        switch_state="off",
+        paused=True,
+        can_pause=False,
         inflight=False,
         attempts=0,
         last_cmd_ms=None,
@@ -222,30 +185,40 @@ def _sw(**kw):
         retry_ms=(2 * MIN, 5 * MIN, 10 * MIN),
     )
     d.update(kw)
-    return switch_action(**d)
+    return pause_action(**d)
 
 
-def test_switch_resumes_when_paused_and_should_charge():
-    assert _sw() == ("turn_on", 0)
+def test_resume_when_paused_and_should_charge():
+    assert _pa() == ("resume", 0)
 
 
-def test_switch_pauses_when_charging_and_should_not():
-    assert _sw(want_charge=False, charging=True, switch_state="on") == ("turn_off", 0)
+def test_pause_when_not_paused_and_should_not_charge():
+    # fx lige efter isætning (requesting) eller mens den lader
+    assert _pa(want_charge=False, paused=False, can_pause=True) == ("pause", 0)
 
 
-def test_switch_nothing_when_state_matches():
-    assert _sw(charging=True, switch_state="on")[0] == "none"
-    assert _sw(want_charge=False, charging=False, switch_state="off")[0] == "none"
+def test_nothing_when_state_matches():
+    assert _pa(want_charge=False, paused=True, can_pause=False)[0] == "none"
+    assert _pa(want_charge=True, paused=False, can_pause=True)[0] == "none"
 
 
-def test_switch_waits_when_command_not_valid():
-    # bilen er selv holdt op (ikke pauset) → resume ugyldig → kontakten utilgængelig
-    assert _sw(switch_state="unavailable")[0] == "wait"
-    assert _sw(want_charge=False, charging=True, switch_state="unavailable")[0] == "wait"
+def test_car_stopped_itself_is_not_resumed():
+    # bilen er fuld/sover: ikke pauset → resume er ugyldig → intet
+    assert _pa(want_charge=True, paused=False, can_pause=True)[0] == "none"
 
 
-def test_switch_never_while_inflight_and_backs_off():
-    assert _sw(inflight=True)[0] == "wait"
-    assert _sw(attempts=1, last_cmd_ms=T - 30 * S) == ("wait", 30 * S)
-    assert _sw(attempts=1, last_cmd_ms=T - 60 * S) == ("turn_on", 0)
-    assert _sw(attempts=2, last_cmd_ms=T - MIN) == ("wait", MIN)
+def test_cannot_pause_when_command_invalid():
+    assert _pa(want_charge=False, paused=False, can_pause=False)[0] == "none"
+
+
+def test_never_while_inflight_and_backs_off_1_2_5_10():
+    assert _pa(inflight=True)[0] == "wait"
+    assert _pa(attempts=1, last_cmd_ms=T - 30 * S) == ("wait", 30 * S)
+    assert _pa(attempts=1, last_cmd_ms=T - 60 * S) == ("resume", 0)
+    assert _pa(attempts=2, last_cmd_ms=T - MIN) == ("wait", MIN)
+    assert _pa(attempts=3, last_cmd_ms=T - 4 * MIN) == ("wait", MIN)
+    assert _pa(attempts=9, last_cmd_ms=T - 10 * MIN) == ("resume", 0)
+
+
+def test_user_action_skips_backoff():
+    assert _pa(attempts=1, last_cmd_ms=T - 5 * S, urgent=True) == ("resume", 0)

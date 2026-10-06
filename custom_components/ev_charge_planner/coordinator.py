@@ -48,6 +48,7 @@ from .const import (
     CONF_NOTIFY_TARGETS,
     CONF_TOMORROW_SENSOR,
     CONF_VEHICLES,
+    COMMAND_RETRY_DELAYS,
     CURRENT_CONFIRM_DELAY,
     CURRENT_MIN_CHANGE_INTERVAL,
     DEFAULT_CHARGE_CURRENT,
@@ -56,7 +57,6 @@ from .const import (
     NOTIFY_CLICK_PATH,
     NOTIFY_DEFAULTS,
     GUEST_VEHICLE,
-    SESSION_SETTLE,
     SLOW_CALL_WARNING,
     START_FAILED_TIMEOUT,
     UPDATE_INTERVAL,
@@ -85,8 +85,8 @@ class Decision:
     desired_current: float = 0.0  # A planneren vil have på laderen
     actual_current: float | None = None  # A laderen melder (None = ukendt)
     current_note: str = ""  # fx "Sætter 16 A — Zaptec svarer ikke, prøver igen 03:07"
-    charge_current_set: float | None = None  # A laderen faktisk bruger (ChargeCurrentSet)
-    max_current_target: float = 0.0  # max current planneren holder (0 A / ladestrøm)
+    max_current_target: float = 0.0  # max-strøm (fast på ladestrømmen)
+    paused: bool | None = None  # laderen er sat på pause (resume gyldig)
     timestamp: datetime = field(default_factory=dt_util.utcnow)
 
 
@@ -121,9 +121,9 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         # Et strøm-kald der stadig kører — Zaptec-integrationen kan selv gentage et
         # kald i op til ~100 s, så der sendes aldrig et nyt mens det kører.
         self._write_inflight = False
-        # Ny session: send den ønskede strøm igen efter dette tidspunkt (Zaptec)
-        self._session_send_at: datetime | None = None
-        self._switch_inflight = False  # ladekontakt-kommando i gang
+        self._cmd_inflight = False  # pause/genoptag-kommando i gang
+        self._cmd_last_error = ""
+        self._max_ok = False  # max-strøm bekræftet på ladestrømmen (røres så ikke igen)
         # Brugerhandling (Stop, Lad straks, automatik til, bilvalg …) må ændre
         # strømmen med det samme — uden Zaptecs 15-minutters-anbefaling.
         self._urgent_until: datetime | None = None
@@ -580,9 +580,10 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         # Hold laderens strøm på den ønskede værdi (gentag til den er sat)
         await self._reconcile_current(decision)
 
-        # Advarsel hvis der skal lades, men ingen strøm kommer
+        # Advarsler: skal lade men ingen strøm / skal holde pause men lader stadig
         if not decision.observer:
             self._update_start_failure_timer(decision, mode)
+            self._update_pause_failure_timer(decision)
 
         # Notifikation: ladning faktisk startet
         await self._maybe_notify_charge_start()
@@ -809,250 +810,226 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
     # ---------- strømstyring ----------
 
     async def _reconcile_current(self, decision: Decision) -> None:
-        """Sessionsstyring:
+        """Styr laderen med pause/genoptag; max-strømmen står fast på ladestrømmen.
 
-        - Kabel ud → max current 0 A, så næste bil ikke starter ved isætning.
-        - Fra isætning til første ladeslot: 0 A ("waiting").
-        - Første ladeslot / "Lad straks": max current = ladestrøm, ÉN gang ("switch").
-        - Resten af sessionen styres KUN med ladekontakten (pause/genoptag);
-          max current røres ikke, før kablet tages ud.
+        - Max-strøm: sættes til ladestrømmen (16 A) én gang, hvis den ikke er det, og
+          røres ikke igen. (En Zaptec Go der har stået på 0 A i timer opdager ikke en
+          ny isætning — derfor aldrig 0 A.)
+        - Skal der ikke lades (uden for slot, ingen bil valgt, mål nået, Stop …) og er
+          laderen ikke pauset → pause (stop_charging_final), også lige efter isætning.
+        - Skal der lades og laderen er pauset → genoptag (resume_charging).
+        - Bilen selv holdt op (ikke pauset): intet — resume er ugyldig dér.
+        Niveau-baseret: ønsket sammenlignes hver gang med laderens faktiske tilstand.
         """
-        rt = self.runtime
         want_charge = decision.desired_current >= guards.MIN_CHARGE_AMPS
         entity = self.current_entity()
         actual = self._get_float(entity) if entity else None
         decision.actual_current = actual
-        connected = decision.charger_mode not in (CM_DISCONNECTED, "unknown", "unavailable")
+        decision.max_current_target = self.charge_amps()
 
-        if not entity:
-            decision.current_note = (
-                "Vælg strøm-entitet under Konfigurér → Indstillinger "
-                "(fx number.zag089363_charger_max_current)"
-            )
-            return
         if decision.observer:
             decision.current_note = (
-                f"Observatør: ville {'lade' if want_charge else 'ikke lade'} "
-                f"(fase {rt.session_phase or 'ukendt'})"
+                f"Observatør: ville {'lade' if want_charge else 'holde pause'}"
             )
             return
+        max_note = await self._ensure_max_current(decision, entity, actual)
+        await self._reconcile_pause(decision, want_charge)
+        if max_note:
+            decision.current_note = f"{max_note} · {decision.current_note}"
+
+    async def _ensure_max_current(
+        self, decision: Decision, entity: str | None, actual: float | None
+    ) -> str:
+        """Sæt max-strømmen til ladestrømmen én gang. Returnerer en statusnote ("" = OK)."""
+        if self._max_ok:
+            return ""
+        if not entity:
+            return "Ingen strøm-entitet fundet (fx number.zag089363_charger_max_current)"
         st = self.hass.states.get(entity)
         if st is None or st.state == "unavailable":
-            # Kald til en utilgængelig entitet springes over af HA — sig det tydeligt
-            decision.current_note = (
-                f"Strøm-entiteten {entity} er utilgængelig — vælg en anden under "
-                "Konfigurér → Indstillinger (fx number.zag089363_charger_max_current)"
-            )
-            return
-
-        # Fase: ukendt (fx efter opgradering midt i en session) → aflæs laderen
-        if rt.session_phase not in ("waiting", "switch"):
-            in_session = connected and actual is not None and actual >= guards.MIN_CHARGE_AMPS
-            rt.session_phase = "switch" if in_session else "waiting"
-            await self.async_save()
-        # Første ladeslot i sessionen → max current op, derefter kun ladekontakten
-        if rt.session_phase == "waiting" and want_charge and connected:
-            _LOGGER.info("Første ladeslot i sessionen — max current til ladestrøm")
-            rt.session_phase = "switch"
-            self._session_send_at = None
-            await self.async_save()
-
-        max_target = self.charge_amps() if rt.session_phase == "switch" else 0.0
-        decision.max_current_target = max_target
-        if not await self._reconcile_max(decision, entity, actual, max_target, connected):
-            return
-        if rt.session_phase != "switch":
-            decision.current_note = (
-                "0 A — venter på første ladeslot" if connected else "0 A — ingen bil tilsluttet"
-            )
-            return
-        await self._reconcile_switch(decision, want_charge)
-
-    async def _reconcile_max(
-        self,
-        decision: Decision,
-        entity: str,
-        actual: float | None,
-        target: float,
-        connected: bool,
-    ) -> bool:
-        """Sæt max current til ``target`` og bekræft. Returnerer True når den er på plads.
-
-        I "switch"-fasen sendes den kun, til laderen har meldt værdien én gang —
-        derefter røres den ikke resten af sessionen.
-        """
+            return f"Max-strøm ({entity}) er utilgængelig"
         rt = self.runtime
-        now = dt_util.utcnow()
+        target = self.charge_amps()
         if rt.cur_target != target:
             rt.cur_target = target
             rt.cur_attempts = 0
             rt.cur_last_write_iso = ""
             rt.cur_confirmed = False
             rt.cur_last_error = ""
+        if actual is not None and abs(actual - target) < 0.5:
+            self._max_ok = True
+            rt.cur_confirmed = True
+            rt.cur_last_error = ""
+            _LOGGER.info("Max-strøm er %.0f A — røres ikke igen", target)
             await self.async_save()
+            return ""
 
-        if rt.session_phase == "switch" and rt.cur_confirmed:
-            return True  # max current røres ikke resten af sessionen
-
-        session_resend = False
-        if rt.session_phase == "waiting" and connected and self._session_send_at is not None:
-            if now < self._session_send_at:
-                self._wake_in((self._session_send_at - now).total_seconds() + 1)
-                decision.current_note = f"Ny session — sender {target:.0f} A om lidt"
-                return False
-            session_resend = True
-
-        setting_ok = actual is not None and abs(actual - target) < 0.5
-        applied, why = setting_ok, ""
-        if rt.session_phase == "waiting" and connected:
-            # 0 A skal også være ANVENDT: ingen ladning og ChargeCurrentSet under 6 A
-            charge_current_set = self._get_float(
-                self._charger_entity("sensor", "allocated_charge_current")
-            )
-            decision.charge_current_set = charge_current_set
-            applied, why = guards.current_applied(
-                desired=target,
-                setting=actual,
-                charge_current_set=charge_current_set,
-                power_flowing=decision.charge_power > CHARGE_POWER_THRESHOLD_KW,
-            )
-        if session_resend:
-            applied, why = False, "ny session"
-
-        if applied:
-            if not rt.cur_confirmed:
-                rt.cur_confirmed = True
-                rt.cur_last_error = ""
-                _LOGGER.info("Max current er %.0f A", target)
-                await self.async_save()
-            return True
-
-        if rt.cur_confirmed and not self._write_inflight and not session_resend:
-            if setting_ok:
-                _LOGGER.warning(
-                    "Laderen har ikke anvendt %.0f A (%s) — sender igen", target, why
-                )
-                rt.cur_last_error = f"ikke anvendt: {why}"
-            else:
-                _LOGGER.warning(
-                    "Max current blev ændret udefra (%s A, ønsket %.0f A) — sætter den igen",
-                    actual,
-                    target,
-                )
-                rt.cur_last_error = f"ændret udefra til {actual} A"
-            rt.cur_confirmed = False
-            await self.async_save()
+        now = dt_util.utcnow()
 
         def iso_ms(value: str) -> int | None:
             return planner.to_ms(value) if value else None
 
         action, wait_ms = guards.current_action(
             desired=target,
-            # Gemt men ikke anvendt tæller som "ikke sat" → send igen (med pauser)
-            actual=None if setting_ok else actual,
+            actual=actual,
             write_inflight=self._write_inflight,
             attempts=rt.cur_attempts,
             last_write_ms=iso_ms(rt.cur_last_write_iso),
-            last_change_ms=iso_ms(rt.cur_change_iso),
-            # Zaptec: højst én ændring pr. 15 min — også gentagelser. Kun brugerens egne
-            # handlinger (Stop, Lad straks, automatik til, bilvalg) sker med det samme.
-            urgent=self._user_urgent(now),
+            last_change_ms=None,
+            urgent=True,
             now_ms=planner.to_ms(now),
+            # Zaptec: højst én ændring af strømmen pr. 15 min — også gentagelser
             confirm_ms=self._min_interval_ms(),
             retry_ms=(self._min_interval_ms(),),
-            min_change_interval_ms=int(CURRENT_MIN_CHANGE_INTERVAL.total_seconds() * 1000),
+            min_change_interval_ms=self._min_interval_ms(),
         )
         if action == guards.CURRENT_WRITE:
-            if session_resend:
-                self._session_send_at = None
-            if rt.cur_attempts == 0 and not setting_ok:
-                rt.cur_change_iso = now.isoformat()
             rt.cur_attempts += 1
             rt.cur_last_write_iso = now.isoformat()
             await self.async_save()
             decision.actuated = True
-            decision.current_note = self._current_note(target, actual, sending=True)
             self._write_inflight = True
             self.hass.async_create_task(self._write_current(entity, target))
-            return False
+            return self._current_note(target, actual, sending=True)
         if wait_ms > 0:
             self._wake_in(wait_ms / 1000 + 1)
-        decision.current_note = self._current_note(target, actual, wait_ms=wait_ms)
-        return False
+        return self._current_note(target, actual, wait_ms=wait_ms)
 
-    async def _reconcile_switch(self, decision: Decision, want_charge: bool) -> None:
-        """Pause/genoptag den igangværende session med Zaptecs ladekontakt."""
+    async def _reconcile_pause(self, decision: Decision, want_charge: bool) -> None:
         rt = self.runtime
+        mode = decision.charger_mode
+        if mode in (CM_DISCONNECTED, "unknown", "unavailable"):
+            decision.current_note = "Ingen bil tilsluttet — laderen er klar (max-strøm uændret)"
+            if rt.cmd_want or rt.cmd_attempts:
+                rt.cmd_want = ""
+                rt.cmd_attempts = 0
+                rt.cmd_last_iso = ""
+                await self.async_save()
+            return
+
+        stop_btn = self._charger_entity("button", "stop_charging")
+        resume_btn = self._charger_entity("button", "resume_charging")
+        # Zaptec: resume er kun gyldig når laderen er pauset → knappen er tilgængelig ⇔ pause
+        paused = self._entity_available(resume_btn)
+        can_pause = self._entity_available(stop_btn)
+        decision.paused = paused
+        charging = mode == CM_CHARGING or decision.charge_power > CHARGE_POWER_THRESHOLD_KW
+
+        want = "charge" if want_charge else "pause"
         now = dt_util.utcnow()
-        sw_entity = self._charger_entity("switch", "charging")
-        sw_state = self._get_state(sw_entity)
-        charging = (
-            decision.charger_mode == CM_CHARGING
-            or decision.charge_power > CHARGE_POWER_THRESHOLD_KW
-        )
-        want = "on" if want_charge else "off"
-        if rt.sw_want != want:
-            rt.sw_want = want
-            rt.sw_attempts = 0
-            rt.sw_last_iso = ""
+        if rt.cmd_want != want:
+            rt.cmd_want = want
+            rt.cmd_attempts = 0
+            rt.cmd_last_iso = ""
             await self.async_save()
 
-        action, wait_ms = guards.switch_action(
+        action, wait_ms = guards.pause_action(
             want_charge=want_charge,
-            charging=charging,
-            switch_state=sw_state,
-            inflight=self._switch_inflight,
-            attempts=rt.sw_attempts,
-            last_cmd_ms=planner.to_ms(rt.sw_last_iso) if rt.sw_last_iso else None,
+            paused=paused,
+            can_pause=can_pause,
+            inflight=self._cmd_inflight,
+            attempts=rt.cmd_attempts,
+            last_cmd_ms=planner.to_ms(rt.cmd_last_iso) if rt.cmd_last_iso else None,
             now_ms=planner.to_ms(now),
-            confirm_ms=self._min_interval_ms(),
-            retry_ms=(self._min_interval_ms(),),
-            urgent=self._user_urgent(now),
+            confirm_ms=int(CURRENT_CONFIRM_DELAY.total_seconds() * 1000),
+            retry_ms=tuple(int(d.total_seconds() * 1000) for d in COMMAND_RETRY_DELAYS),
+            urgent=self._user_urgent(now) and rt.cmd_attempts == 0,
         )
-        amps = f"{decision.max_current_target:.0f} A"
-        if action in (guards.SWITCH_ON, guards.SWITCH_OFF):
-            rt.sw_attempts += 1
-            rt.sw_last_iso = now.isoformat()
+        if action in (guards.CMD_PAUSE, guards.CMD_RESUME):
+            rt.cmd_attempts += 1
+            rt.cmd_last_iso = now.isoformat()
             await self.async_save()
             decision.actuated = True
-            verb = "Genoptager" if action == guards.SWITCH_ON else "Pauser"
-            decision.current_note = f"{amps} · {verb} via ladekontakten (forsøg {rt.sw_attempts})"
-            self._switch_inflight = True
-            self.hass.async_create_task(self._switch_cmd(sw_entity, action))
+            verb = "Genoptager" if action == guards.CMD_RESUME else "Pauser"
+            decision.current_note = f"{verb} laderen (forsøg {rt.cmd_attempts})"
+            self._cmd_inflight = True
+            button = resume_btn if action == guards.CMD_RESUME else stop_btn
+            self.hass.async_create_task(self._press_cmd(button, action))
             return
         if wait_ms > 0:
             self._wake_in(wait_ms / 1000 + 1)
-        if action == guards.SWITCH_NONE:
-            decision.current_note = f"{amps} · {'lader' if charging else 'pauset'}"
-        elif self._switch_inflight:
-            decision.current_note = f"{amps} · venter på Zaptec (ladekontakt)"
-        elif want_charge and sw_state != "off":
-            decision.current_note = f"{amps} · laderen kan ikke genoptages lige nu"
+            at = dt_util.as_local(now + timedelta(milliseconds=wait_ms)).strftime("%H:%M")
+            verb = "genoptage" if want_charge else "pause"
+            decision.current_note = (
+                f"Zaptec har ikke gennemført {verb} endnu — prøver igen {at}"
+                + (f" (seneste fejl: {self._cmd_last_error})" if self._cmd_last_error else "")
+            )
+        elif self._cmd_inflight:
+            decision.current_note = "Venter på Zaptec …"
+        elif want_charge:
+            if charging:
+                decision.current_note = "Lader"
+            elif mode == CM_REQUESTING:
+                decision.current_note = "Genoptaget — venter på at bilen begynder"
+            else:
+                decision.current_note = "Bilen er selv holdt op (fuld, ladegrænse eller sover)"
         else:
-            decision.current_note = f"{amps} · {'genoptager' if want_charge else 'pauser'} snart"
+            decision.current_note = (
+                "Pauset — venter på ladeslot" if paused else "Holder pause"
+            )
 
-    async def _switch_cmd(self, entity_id: str | None, action: str) -> None:
-        """Send kontakt-kommandoen og VENT til kaldet er færdigt."""
+    def _entity_available(self, entity_id: str | None) -> bool:
+        if not entity_id:
+            return False
+        st = self.hass.states.get(entity_id)
+        return st is not None and st.state != "unavailable"
+
+    async def _press_cmd(self, entity_id: str | None, action: str) -> None:
+        """Tryk pause/genoptag og VENT til kaldet er færdigt (inkl. Zaptecs genforsøg)."""
         started = time.monotonic()
-        service = "turn_on" if action == guards.SWITCH_ON else "turn_off"
         try:
             await self.hass.services.async_call(
-                "switch", service, {"entity_id": entity_id}, blocking=True
+                "button", "press", {"entity_id": entity_id}, blocking=True
             )
+            self._cmd_last_error = ""
         except Exception as err:  # noqa: BLE001 — Zaptec-fejl må ikke vælte coordinatoren
-            _LOGGER.warning("Ladekontakten (%s) fejlede: %s", service, err)
+            self._cmd_last_error = str(err)[:200] or type(err).__name__
+            _LOGGER.warning("%s fejlede: %s", action, err)
         finally:
-            self._switch_inflight = False
+            self._cmd_inflight = False
         took = time.monotonic() - started
         if took > SLOW_CALL_WARNING.total_seconds():
-            _LOGGER.warning(
-                "Ladekontakten (%s) tog %.0f s — Zaptec svarer langsomt", service, took
-            )
+            _LOGGER.warning("%s tog %.0f s — Zaptec svarer langsomt", action, took)
         else:
-            _LOGGER.info("Ladekontakten: %s (%.1f s)", service, took)
+            _LOGGER.info("%s sendt (%.1f s)", action, took)
         if not self._closed:
             self._wake_in(CURRENT_CONFIRM_DELAY.total_seconds() + 1)
             await self.async_request_refresh()
+
+    def _update_pause_failure_timer(self, decision: Decision) -> None:
+        """Notificér én gang hvis laderen bliver ved med at lade, når den skal holde pause."""
+        rt = self.runtime
+        now = dt_util.utcnow()
+        wait_ms = (
+            planner.to_ms(rt.pause_wait_since_iso) if rt.pause_wait_since_iso else None
+        )
+        new_wait, should_notify = guards.start_failure_state(
+            should_be_charging=decision.desired_current < guards.MIN_CHARGE_AMPS
+            and decision.charger_mode not in (CM_DISCONNECTED, "unknown", "unavailable"),
+            power_flowing=not (decision.charge_power > CHARGE_POWER_THRESHOLD_KW),
+            wait_since_ms=wait_ms,
+            now_ms=planner.to_ms(now),
+            timeout_ms=int(START_FAILED_TIMEOUT.total_seconds() * 1000),
+            already_notified=rt.pause_failed_notified,
+        )
+        if new_wait is None:
+            if rt.pause_wait_since_iso or rt.pause_failed_notified:
+                rt.pause_wait_since_iso = ""
+                rt.pause_failed_notified = False
+                self.hass.async_create_task(self.async_save())
+            return
+        if not rt.pause_wait_since_iso:
+            rt.pause_wait_since_iso = now.isoformat()
+            self.hass.async_create_task(self.async_save())
+        if should_notify:
+            rt.pause_failed_notified = True
+            msg = (
+                "Laderen lader stadig uden for ladeslot — Zaptec har ikke gennemført "
+                "pausen. Planneren bliver ved med at prøve."
+            )
+            _LOGGER.warning(msg)
+            self._notify("⚠️ Laderen kunne ikke pauses", msg, "notify_not_enough_time")
+            self.hass.async_create_task(self.async_save())
 
     def _current_note(
         self, desired: float, actual: float | None, *, sending: bool = False, wait_ms: int = 0
@@ -1172,20 +1149,19 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         if not should_notify:
             return
         rt.start_failed_notified = True
-        amps = decision.desired_current
-        if not rt.cur_confirmed:
+        if decision.paused:
             msg = (
-                f"Zaptec har ikke bekræftet {amps:.0f} A endnu — planneren bliver "
-                "ved med at prøve, til det lykkes."
+                "Laderen er stadig på pause — Zaptec har ikke gennemført genoptag. "
+                "Planneren bliver ved med at prøve."
             )
         elif mode == CM_REQUESTING:
             msg = (
-                f"Laderen har {amps:.0f} A, men venter på autorisation. Er "
-                "autorisation slået til i Zaptec?"
+                "Laderen er genoptaget og venter på bilen, men der kommer ingen strøm. "
+                "Sover bilen?"
             )
         else:
             msg = (
-                f"Laderen giver {amps:.0f} A, men bilen trækker ikke strøm. "
+                "Laderen er genoptaget, men bilen trækker ikke strøm. "
                 "Sover bilen, eller er dens ladegrænse nået?"
             )
         _LOGGER.warning("Ingen strøm i ladeslot: %s", msg)
@@ -1284,15 +1260,12 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
         rt.enabled = False
         rt.start_wait_since_iso = ""
         rt.start_failed_notified = False
-        # Kabel ud → max current 0 A, så næste bil ikke starter; ny session venter
-        # på første ladeslot, før der lades.
-        rt.session_phase = "waiting"
-        # Kabel ud er en handling fra brugeren: 0 A sendes straks (ikke efter
-        # 15-minutters-reglen), så en ny bil ikke når at starte.
-        self.mark_urgent()
-        rt.sw_want = ""
-        rt.sw_attempts = 0
-        rt.sw_last_iso = ""
+        # Kabel ud: laderen røres ikke (max-strøm står fast og er klar til næste bil)
+        rt.cmd_want = ""
+        rt.cmd_attempts = 0
+        rt.cmd_last_iso = ""
+        rt.pause_wait_since_iso = ""
+        rt.pause_failed_notified = False
         # Kabel ud → et manuelt valgt afgangstidspunkt gælder ikke længere: næste
         # tilslutning lader til næste kl. 07:00, medmindre brugeren selv ændrer det
         # (også før stikket sættes i — derfor nulstilles her og ikke ved isætning).
@@ -1330,9 +1303,8 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             rt.enabled = False
             rt.start_wait_since_iso = ""
             rt.start_failed_notified = False
-            # Zaptec læser MaxCurrent, når sessionen starter → send værdien igen bagefter
-            self._session_send_at = dt_util.utcnow() + SESSION_SETTLE
-            self._wake_in(SESSION_SETTLE.total_seconds() + 1)
+            # Ingen bil valgt → ønsket er pause; den sendes med det samme
+            self.mark_urgent()
             self._set_plan(None)
             self._notify(
                 "🔌 Bil tilsluttet",

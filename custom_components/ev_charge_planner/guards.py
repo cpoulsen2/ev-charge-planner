@@ -5,10 +5,9 @@ unit-testes isoleret (som ``planner.py``). Al tilstand gives ind som argumenter;
 funktionerne har ingen sideeffekter. Coordinatoren holder selve tilstanden
 (persisteret i ``Runtime``) og kalder disse funktioner.
 
-Laderen styres udelukkende via en strømgrænse (fx installationens available
-current): ladestrøm i et slot, ellers 0 A. At sætte en værdi er idempotent — det
-samme kald to gange giver samme resultat — så kald kan trygt gentages, til laderen
-melder den ønskede værdi tilbage.
+Laderens max-strøm sættes én gang til ladestrømmen og står fast; selve ladningen
+styres med pause (stop_charging_final) og genoptag (resume_charging). Kald gentages
+med pauser, til laderens tilstand viser det ønskede resultat.
 """
 
 from __future__ import annotations
@@ -36,29 +35,6 @@ def charger_max_current_entity(charger_mode_sensor: str | None) -> str | None:
 
 
 MIN_CHARGE_AMPS = 6.0  # Zaptec: under 6 A pauser laderen, fra 6 A lader den
-
-
-def current_applied(
-    *,
-    desired: float,
-    setting: float | None,
-    charge_current_set: float | None,
-    power_flowing: bool,
-) -> tuple[bool, str]:
-    """Har laderen faktisk ANVENDT den ønskede strøm (ikke kun gemt den)?
-
-    Zaptec: sammenlign med både MaxCurrent (indstillingen) og ChargeCurrentSet
-    (det laderen bruger). En ændring kan accepteres i skyen uden at nå laderen.
-    Returnerer ``(anvendt, forklaring)``.
-    """
-    if setting is None or abs(setting - desired) >= 0.5:
-        return (False, "")
-    want_charge = desired >= MIN_CHARGE_AMPS
-    if charge_current_set is not None and (charge_current_set >= MIN_CHARGE_AMPS) != want_charge:
-        return (False, f"laderen bruger {charge_current_set:.0f} A")
-    if not want_charge and power_flowing:
-        return (False, "der lader stadig")
-    return (True, "")
 
 
 CURRENT_IN_SYNC = "in_sync"
@@ -114,17 +90,17 @@ def current_action(
     return (CURRENT_WAIT, earliest - now_ms)
 
 
-SWITCH_NONE = "none"
-SWITCH_ON = "turn_on"
-SWITCH_OFF = "turn_off"
-SWITCH_WAIT = "wait"
+CMD_NONE = "none"
+CMD_PAUSE = "pause"
+CMD_RESUME = "resume"
+CMD_WAIT = "wait"
 
 
-def switch_action(
+def pause_action(
     *,
     want_charge: bool,
-    charging: bool,
-    switch_state: str | None,
+    paused: bool,
+    can_pause: bool,
     inflight: bool,
     attempts: int,
     last_cmd_ms: int | None,
@@ -133,27 +109,34 @@ def switch_action(
     retry_ms: tuple[int, ...],
     urgent: bool = False,
 ) -> tuple[str, int]:
-    """Styring af en igangværende session med Zaptecs ladekontakt.
+    """Pause/genoptag laderen (max-strømmen står fast på ladestrømmen).
 
-    Kontakten er "on" når laderen lader og kun tilgængelig, når kommandoen er
-    gyldig: slå fra (stop_charging_final) når den lader, slå til (resume_charging)
-    kun når den er pauset. Er den utilgængelig, kan der ikke gøres noget nu (fx bilen
-    er selv holdt op, eller laderen venter). Gentagelser får stigende pauser.
+    - ``paused``: laderen er sat på pause (Zaptec: resume er kun gyldig dér —
+      ``button.<lader>_resume_charging`` er tilgængelig).
+    - ``can_pause``: stop_charging_final er gyldig (ikke allerede pauset, ikke frakoblet).
+
+    Skal der lades og laderen er pauset → genoptag. Lader den, venter den, eller er
+    bilen selv holdt op (ikke pauset) → intet (resume er ugyldig dér).
+    Skal der IKKE lades og laderen ikke er pauset → pause (også lige efter isætning,
+    så bilen ikke lader ukontrolleret). Gentagelser først efter ``confirm_ms`` og
+    derefter stigende pauser — så længe ønsket ≠ faktisk; der gives aldrig op.
     Returnerer ``(handling, ventetid_ms)``.
     """
-    if want_charge == charging:
-        return (SWITCH_NONE, 0)
+    if want_charge:
+        if not paused:
+            return (CMD_NONE, 0)
+        cmd = CMD_RESUME
+    else:
+        if paused or not can_pause:
+            return (CMD_NONE, 0)
+        cmd = CMD_PAUSE
     if inflight:
-        return (SWITCH_WAIT, 0)
-    if want_charge and switch_state != "off":
-        return (SWITCH_WAIT, 0)
-    if not want_charge and switch_state != "on":
-        return (SWITCH_WAIT, 0)
+        return (CMD_WAIT, 0)
     if attempts > 0 and last_cmd_ms is not None and not urgent:
         delay = confirm_ms if attempts == 1 else retry_ms[min(attempts - 2, len(retry_ms) - 1)]
         if now_ms < last_cmd_ms + delay:
-            return (SWITCH_WAIT, last_cmd_ms + delay - now_ms)
-    return (SWITCH_ON if want_charge else SWITCH_OFF, 0)
+            return (CMD_WAIT, last_cmd_ms + delay - now_ms)
+    return (cmd, 0)
 
 
 def start_failure_state(

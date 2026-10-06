@@ -21,21 +21,20 @@ elpriser (Strømligning) og styrer en Zaptec-ladeboks.
 - **Ladetid til mål** — sensor der viser hvor lang tid der kræves for at nå målet.
 - **Køretøjsstyring i UI** — ingen standard-biler, kun **Guest** indbygget; tilføj selv biler
   med kapacitet og valgfri SoC-sensor.
-- **Sessionsstyring af Zaptec-laderen**:
-  1. Når kablet tages ud, sættes laderens max current (`number.<lader>_charger_max_current`,
-     findes automatisk) til **0 A**, så næste bil ikke begynder at lade ved isætning.
-  2. Fra isætning til **første ladeslot** står den på 0 A.
-  3. Ved første ladeslot (eller "Lad straks") sættes max current til ladestrømmen
-     (standard **16 A**) — én gang.
-  4. **Resten af sessionen** styres udelukkende med ladekontakten
-     (`switch.<lader>_charging`): pause uden for slots, genoptag i slots. Max current
-     røres ikke, før kablet tages ud.
-
-  Alle kald til Zaptec gentages med stigende pauser, til laderen melder det ønskede
-  resultat, og der er aldrig to kald i gang samtidig. Status viser fasen
-  (`session_phase`), max current og hvad laderen gør.
-- **Slås integrationen fra eller slettes**, sættes max current tilbage til ladestrømmen og
-  en pauset lader genoptages, så den virker som en almindelig lader igen.
+- **Styring med pause/genoptag** (Zaptec Go, autorisation slået fra):
+  - Laderens max-strøm (`number.<lader>_charger_max_current`, findes automatisk) sættes
+    **én gang** til ladestrømmen (standard 16 A) og røres aldrig igen. En Zaptec Go, der
+    har stået på 0 A i timer, opdager ikke en ny isætning — derfor aldrig 0 A.
+  - **Kabel i:** laderen sættes på **pause** med det samme (`button.<lader>_stop_charging`),
+    medmindre et ladeslot er i gang eller "Lad straks" er valgt. Uden valgt bil holdes pausen.
+  - **Ladeslot / Lad straks:** **genoptag** (`button.<lader>_resume_charging`, kun gyldig når
+    laderen er pauset). **Slot slut / mål nået / Stop:** pause.
+  - **Bilen holder selv op** (ikke pauset): intet forsøges. **Kabel ud:** ingen handling.
+  - Kommandoer gentages efter 1, 2, 5 og 10 min, så længe ønsket ≠ faktisk tilstand, og der
+    gives aldrig op. Der er aldrig to kald i gang samtidig, og du får besked, hvis det ikke
+    er lykkedes efter 5 min. Efter en HA-genstart rettes laderen ud fra plan og tid.
+- **Slås integrationen fra eller slettes**, genoptages en pauset lader, så den virker som en
+  almindelig lader igen.
 - **Robust over for genstart** — planen og strømstyringens tilstand gemmes, så Home
   Assistant kan genstarte midt i en ladning.
 - **Observatør-tilstand** — beregn og log alt uden at røre laderen (til indkøring).
