@@ -41,6 +41,7 @@ class EnabledSwitch(EvcpEntity, SwitchEntity):
         return self.runtime.enabled
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        self.coordinator.require_connected()
         self.runtime.enabled = True
         # Eksplicit brugerhandling → strømmen må ændres med det samme
         self.coordinator.on_user_restart()

@@ -750,3 +750,33 @@ async def test_disable_resumes_paused_charger(sim, hass):
     await integration.async_unload_entry(hass, entry)
     await hass.async_block_till_done()
     assert not zap.paused and zap.mode == CHG, "slået fra → normal lader igen"
+
+
+async def test_enable_and_force_refused_without_car(sim):
+    from custom_components.ev_charge_planner.button import ForceChargeButton
+    from custom_components.ev_charge_planner.switch import EnabledSwitch
+
+    c, zap, _, tick, *_ = sim
+    zap.unplug()
+    await tick(S(-900))
+    assert not c.runtime.enabled
+    with pytest.raises(HomeAssistantError):
+        await EnabledSwitch(c).async_turn_on()
+    with pytest.raises(HomeAssistantError):
+        await ForceChargeButton(c).async_press()
+    assert not c.runtime.enabled and not c.runtime.force_charge
+    assert zap.cmds == [] and zap.writes == []
+
+
+async def test_stale_selection_is_cleared_when_disconnected(sim):
+    """Kabel ud blev overset (fx under genstart): ryd bilvalg og automatik."""
+    c, zap, _, tick, *_ = sim
+    departure = c.runtime.departure_iso
+    zap.unplug()
+    c._prev_charger_mode = DISC  # overgangen blev ikke set
+    c.runtime.enabled = True
+    c.runtime.force_charge = True
+    await tick(S(-900))
+    assert c.runtime.active_vehicle == CHOOSE_VEHICLE
+    assert not c.runtime.enabled and not c.runtime.force_charge
+    assert c.runtime.departure_iso == departure, "afgangstiden røres ikke"

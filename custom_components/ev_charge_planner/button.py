@@ -48,6 +48,7 @@ class ForceChargeButton(EvcpEntity, ButtonEntity):
         super().__init__(coordinator, "force_charge")
 
     async def async_press(self) -> None:
+        self.coordinator.require_connected()
         self.runtime.force_charge = True
         self.runtime.enabled = True
         # Eksplicit brugerhandling → strømmen må ændres med det samme

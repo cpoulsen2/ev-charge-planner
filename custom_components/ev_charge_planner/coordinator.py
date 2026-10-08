@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -169,6 +170,11 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
     def mark_urgent(self) -> None:
         """Brugerhandling: strømmen må ændres med det samme."""
         self._urgent_until = dt_util.utcnow() + USER_ACTION_URGENCY
+
+    def require_connected(self) -> None:
+        """Afvis "Aktivér"/"Lad straks" når der ikke er sat en bil i."""
+        if self._charger_mode() == CM_DISCONNECTED:
+            raise HomeAssistantError("Ingen bil tilsluttet — sæt stikket i først")
 
     def on_user_restart(self) -> None:
         """Brugeren slog automatik til / trykkede "Lad straks": ny venteperiode."""
@@ -576,6 +582,18 @@ class EvcpCoordinator(DataUpdateCoordinator[Decision]):
             self._prev_charger_mode = mode
             self._mode_since = dt_util.utcnow()
             rt.prev_charger_mode = mode  # persistér så genstart kender sidste mode
+            await self.async_save()
+
+        # Frakoblet, men stadig bil valgt / automatik til (fx hvis kabel ud blev overset):
+        # ryd op, så intet kan aktiveres uden bil. Afgangstiden røres ikke.
+        if mode == CM_DISCONNECTED and (
+            rt.enabled or rt.force_charge or rt.active_vehicle != CHOOSE_VEHICLE
+        ):
+            _LOGGER.info("Laderen er frakoblet — fravælger bil og slår automatik fra")
+            rt.enabled = False
+            rt.force_charge = False
+            rt.active_vehicle = CHOOSE_VEHICLE
+            self._set_plan(None)
             await self.async_save()
 
         decision = self._decide(mode)
